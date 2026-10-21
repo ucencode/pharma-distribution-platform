@@ -1,6 +1,6 @@
 "use client";
 
-import { Boxes, Plus } from "lucide-react";
+import { Boxes, Package, Plus, Snowflake, Truck } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { inventory, products, warehouses } from "@/lib/db/schema";
 import { api } from "./api";
@@ -140,8 +140,9 @@ export default function WarehousesManager() {
                 <th className={th}>ID</th>
                 <th className={th}>City</th>
                 <th className={`${th} text-right`}>Distance (km)</th>
-                <th className={th}>Cold storage</th>
-                <th className={th}>Refrigerated fleet</th>
+                <th className={th}>
+                  <span className="sr-only">Cold chain capability</span>
+                </th>
                 <th className={th}>
                   <span className="sr-only">Actions</span>
                 </th>
@@ -154,14 +155,22 @@ export default function WarehousesManager() {
                   <td className={td}>{row.city}</td>
                   <td className={`${td} text-right tabular-nums`}>{row.distanceToCustomerKm}</td>
                   <td className={td}>
-                    <Badge variant={row.hasColdStorage ? "green" : "red"}>
-                      {row.hasColdStorage ? "Yes" : "No"}
-                    </Badge>
-                  </td>
-                  <td className={td}>
-                    <Badge variant={row.hasRefrigeratedFleet ? "green" : "red"}>
-                      {row.hasRefrigeratedFleet ? "Yes" : "No"}
-                    </Badge>
+                    <div className="flex gap-2">
+                      {row.hasColdStorage && (
+                        <Badge variant="blue" title="Cold storage: can store cold chain products">
+                          <Package className="size-3.5" aria-hidden="true" />
+                          <Snowflake className="size-3.5" aria-hidden="true" />
+                          Cold Storage
+                        </Badge>
+                      )}
+                      {row.hasRefrigeratedFleet && (
+                        <Badge variant="lightBlue" title="Refrigerated fleet: can deliver cold chain products">
+                          <Truck className="size-3.5" aria-hidden="true" />
+                          <Snowflake className="size-3.5" aria-hidden="true" />
+                          Refrigerated Fleet
+                        </Badge>
+                      )}
+                    </div>
                   </td>
                   <td className={td}>
                     <RowActions

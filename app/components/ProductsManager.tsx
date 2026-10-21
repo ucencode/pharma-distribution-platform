@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Plus, Snowflake } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { categories, products } from "@/lib/db/schema";
 import { api } from "./api";
@@ -132,7 +132,9 @@ export default function ProductsManager() {
                 <th className={th}>ID</th>
                 <th className={th}>Name</th>
                 <th className={th}>Category</th>
-                <th className={th}>Cold chain</th>
+                <th className={th}>
+                  <span className="sr-only">Handling</span>
+                </th>
                 <th className={th}>
                   <span className="sr-only">Actions</span>
                 </th>
@@ -145,9 +147,15 @@ export default function ProductsManager() {
                   <td className={td}>{row.name}</td>
                   <td className={td}>{categoryName(row.categoryId)}</td>
                   <td className={td}>
-                    <Badge variant={row.requiresColdChain ? "green" : "red"}>
-                      {row.requiresColdChain ? "Yes" : "No"}
-                    </Badge>
+                    {row.requiresColdChain && (
+                      <Badge variant="lightBlue" title="Cold chain required: store and ship refrigerated">
+                        <Snowflake className="size-3.5" aria-hidden="true" />
+                        <span className="font-bold" aria-hidden="true">
+                          !
+                        </span>
+                        Cold Chain
+                      </Badge>
+                    )}
                   </td>
                   <td className={td}>
                     <RowActions
