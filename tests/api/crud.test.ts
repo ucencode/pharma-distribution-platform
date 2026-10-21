@@ -113,6 +113,17 @@ describe("products", () => {
     expect(res.status).toBe(409);
   });
 
+  it("rejects an unknown category on update", async () => {
+    expect((await productItem.PATCH(json({ categoryId: "TEST-MISSING" }), ctx())).status).toBe(409);
+  });
+
+  it("returns 404 for a missing product", async () => {
+    const missing = params({ id: "TEST-MISSING" });
+    expect((await productItem.GET(empty, missing)).status).toBe(404);
+    expect((await productItem.PATCH(json({ name: "X" }), missing)).status).toBe(404);
+    expect((await productItem.DELETE(empty, missing)).status).toBe(404);
+  });
+
   it("does not delete a category that a product uses", async () => {
     expect((await categoryItem.DELETE(empty, params({ id: ids.category }))).status).toBe(409);
   });
@@ -144,9 +155,17 @@ describe("warehouses", () => {
     expect(updated.hasColdStorage).toBe(true);
   });
 
-  it("rejects a negative distance", async () => {
+  it("rejects a negative distance and an empty update", async () => {
     const res = await warehouseList.POST(json({ city: "Test City X", distanceToCustomerKm: -1 }));
     expect(res.status).toBe(400);
+    expect((await warehouseItem.PATCH(json({}), ctx())).status).toBe(400);
+  });
+
+  it("returns 404 for a missing warehouse", async () => {
+    const missing = params({ id: "TEST-MISSING" });
+    expect((await warehouseItem.GET(empty, missing)).status).toBe(404);
+    expect((await warehouseItem.PATCH(json({ city: "X" }), missing)).status).toBe(404);
+    expect((await warehouseItem.DELETE(empty, missing)).status).toBe(404);
   });
 });
 
@@ -175,6 +194,43 @@ describe("inventory", () => {
     const row = { warehouseId: ids.warehouse, productId: ids.product, quantity: 1 };
     expect((await inventoryList.POST(json(row))).status).toBe(409);
     expect((await inventoryList.POST(json({ ...row, warehouseId: "TEST-MISSING" }))).status).toBe(409);
+    expect((await inventoryList.POST(json({ ...row, productId: "TEST-MISSING" }))).status).toBe(409);
+  });
+
+  it("rejects a missing or non-number quantity, a missing key, an empty update and malformed JSON", async () => {
+    const key = { warehouseId: ids.warehouse, productId: ids.product };
+    expect((await inventoryList.POST(json(key))).status).toBe(400);
+    expect((await inventoryList.POST(json({ ...key, quantity: "5" }))).status).toBe(400);
+    expect((await inventoryList.POST(json({ warehouseId: ids.warehouse, quantity: 1 }))).status).toBe(400);
+    expect((await inventoryList.POST(json("not json"))).status).toBe(400);
+    expect((await inventoryItem.PATCH(json({}), ctx())).status).toBe(400);
+    expect((await inventoryItem.PATCH(json("not json"), ctx())).status).toBe(400);
+  });
+
+  it("accepts a quantity of zero and does not change the key on update", async () => {
+    const res = await inventoryItem.PATCH(
+      json({ quantity: 0, warehouseId: "TEST-OTHER", productId: "TEST-OTHER" }),
+      ctx(),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      warehouseId: ids.warehouse,
+      productId: ids.product,
+      quantity: 0,
+    });
+  });
+
+  it("sets updated_at on update", async () => {
+    const before = (await (await inventoryItem.GET(empty, ctx())).json()).updatedAt;
+    const after = (await (await inventoryItem.PATCH(json({ quantity: 5 }), ctx())).json()).updatedAt;
+    expect(new Date(after).getTime()).toBeGreaterThan(new Date(before).getTime());
+  });
+
+  it("returns 404 for a missing stock row", async () => {
+    const missing = params({ warehouseId: ids.warehouse, productId: "TEST-MISSING" });
+    expect((await inventoryItem.GET(empty, missing)).status).toBe(404);
+    expect((await inventoryItem.PATCH(json({ quantity: 1 }), missing)).status).toBe(404);
+    expect((await inventoryItem.DELETE(empty, missing)).status).toBe(404);
   });
 
   it("does not delete a product or warehouse that has stock", async () => {

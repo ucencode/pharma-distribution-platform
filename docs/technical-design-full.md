@@ -447,7 +447,7 @@ pharma-distribution-platform/
 
 **API integration tests (Vitest, local PostgreSQL):** the tests call the route handlers directly and assert response bodies and status codes. They run against the database in `DATABASE_URL` (read from `.env`) and are started with `npm test`.
 
-- CRUD (`tests/api/crud.test.ts`): create, read, list, update and delete for categories, products, warehouses and stock. Error cases: invalid input and malformed JSON (`400`), missing record (`404`), duplicate category name, unknown reference and delete of a referenced record (`409`). The generated ID format is checked, and an `id` sent on create is ignored.
+- CRUD (`tests/api/crud.test.ts`): create, read, list, update and delete for categories, products, warehouses and stock. Error cases: invalid input, empty update and malformed JSON (`400`), missing record (`404`), duplicate category name or stock row, unknown reference on create or update and delete of a referenced record (`409`). The generated ID format is checked, and an `id` sent on create is ignored. For stock, the tests also check that a quantity of zero is accepted, that an update does not change the warehouse or product of the row, and that an update sets `updated_at`.
 - Test records have names starting with `Test`. Their generated IDs are kept during the run and the records are deleted by those IDs afterwards. Seed data is not modified.
 
 **Smoke test:** the UI presets are run against the deployed URL.
