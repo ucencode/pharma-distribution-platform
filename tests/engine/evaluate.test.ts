@@ -106,6 +106,105 @@ describe("worked examples", () => {
   });
 });
 
+describe("same-city transit", () => {
+  it("delivers from W01 once when W01 and W02 in Surabaya together cover the order", () => {
+    const decision = evaluate(order(["P001", 220], ["P003", 100]), sampleSnapshot());
+
+    expect(decision.status).toBe("FULL");
+    expect(decision.shipments).toEqual([
+      {
+        warehouseId: "W01",
+        distanceKm: 5,
+        items: [
+          { productId: "P001", quantity: 220 },
+          { productId: "P003", quantity: 100 },
+        ],
+      },
+    ]);
+    expect(decision.transfers).toEqual([
+      { fromWarehouseId: "W02", toWarehouseId: "W01", productId: "P001", quantity: 20 },
+    ]);
+    expect(decision.metrics).toEqual({ shipmentCount: 1, totalDistanceKm: 5 });
+    expect(decision.explanation).toEqual([
+      "Fulfilled with 1 delivery from W01 (5 km). Warehouses in Surabaya together supply the whole order.",
+      "W02 sends 20 Surgical Gloves (Box of 100) to W01 for transit. W01 delivers them to the customer.",
+      "Surgical Gloves (Box of 100): 200 from W01 (5 km) and 20 from W02 through W01 (5 km).",
+      "Disposable Syringe (Box of 50): 100 from W01 (5 km).",
+    ]);
+  });
+
+  it("splits 600 gloves into 3 deliveries, with W02 going through W01", () => {
+    const decision = evaluate(order(["P001", 600]), sampleSnapshot());
+
+    expect(decision.shipments).toEqual([
+      { warehouseId: "W01", distanceKm: 5, items: [{ productId: "P001", quantity: 250 }] },
+      { warehouseId: "W03", distanceKm: 25, items: [{ productId: "P001", quantity: 300 }] },
+      { warehouseId: "W07", distanceKm: 45, items: [{ productId: "P001", quantity: 50 }] },
+    ]);
+    expect(decision.transfers).toEqual([
+      { fromWarehouseId: "W02", toWarehouseId: "W01", productId: "P001", quantity: 50 },
+    ]);
+    expect(decision.metrics).toEqual({ shipmentCount: 3, totalDistanceKm: 75 });
+  });
+
+  it("does not move cold-chain products to or from a warehouse without cold chain", () => {
+    const decision = evaluate(order(["P001", 100], ["P002", 10]), sampleSnapshot());
+
+    expect(decision.transfers).toEqual([]);
+    expect(decision.shipments.map((s) => s.warehouseId)).toEqual(["W01", "W04"]);
+  });
+
+  it("uses the cold-chain warehouse of the city as the hub when the order has a cold-chain product", () => {
+    const snapshot = sampleSnapshot();
+    snapshot.warehouses.push({
+      id: "W09",
+      city: "Surabaya",
+      distanceToCustomerKm: 15,
+      hasColdStorage: true,
+      hasRefrigeratedFleet: true,
+    });
+    snapshot.stock.set("W09", new Map([["P002", 10]]));
+
+    const decision = evaluate(order(["P001", 100], ["P002", 10]), snapshot);
+
+    expect(decision.shipments).toEqual([
+      {
+        warehouseId: "W09",
+        distanceKm: 15,
+        items: [
+          { productId: "P001", quantity: 100 },
+          { productId: "P002", quantity: 10 },
+        ],
+      },
+    ]);
+    expect(decision.transfers).toEqual([
+      { fromWarehouseId: "W01", toWarehouseId: "W09", productId: "P001", quantity: 100 },
+    ]);
+  });
+
+  it("uses the nearest warehouse of the city as the hub when the order has no cold-chain product", () => {
+    const snapshot = sampleSnapshot();
+    snapshot.warehouses.push({
+      id: "W09",
+      city: "Surabaya",
+      distanceToCustomerKm: 15,
+      hasColdStorage: true,
+      hasRefrigeratedFleet: true,
+    });
+    snapshot.stock.set("W09", new Map([["P001", 100]]));
+
+    const decision = evaluate(order(["P001", 300]), snapshot);
+
+    expect(decision.shipments).toEqual([
+      { warehouseId: "W01", distanceKm: 5, items: [{ productId: "P001", quantity: 300 }] },
+    ]);
+    expect(decision.transfers).toEqual([
+      { fromWarehouseId: "W02", toWarehouseId: "W01", productId: "P001", quantity: 50 },
+      { fromWarehouseId: "W09", toWarehouseId: "W01", productId: "P001", quantity: 50 },
+    ]);
+  });
+});
+
 describe("unfulfillable order", () => {
   it("allocates nothing when no eligible warehouse has stock", () => {
     const snapshot = sampleSnapshot();

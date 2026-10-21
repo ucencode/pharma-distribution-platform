@@ -77,7 +77,7 @@ Cold-chain handling is a product attribute (`requires_cold_chain`) and is indepe
 | A2 | Evaluating an order produces a quote and does not decrement stock. Reservation is described in §10. |
 | A3 | Quantities are positive integers in the product's unit (box or vial). Duplicate lines for the same product are merged. |
 | A4 | A shipment is one trip from one warehouse to the customer. All products from the same warehouse travel together. Vehicle capacity is not modelled. |
-| A5 | An order is split across warehouses only when no single eligible warehouse can supply it in full. |
+| A5 | An order is split across warehouses only when no single eligible warehouse or city group (§7.2) can supply it in full. |
 | A6 | If an order cannot be fully covered, the response contains the best partial allocation and the shortfall per product. The order is not rejected. |
 
 ---
@@ -224,6 +224,7 @@ type Decision = {
     distanceKm: number;
     items: { productId: string; quantity: number }[];
   }[];
+  transfers: { fromWarehouseId: string; toWarehouseId: string; productId: string; quantity: number }[];
   unfulfilled: { productId: string; requested: number; available: number }[];
   metrics: { shipmentCount: number; totalDistanceKm: number };
   explanation: string[];
@@ -244,11 +245,12 @@ Warehouses are ordered by `distanceToCustomerKm`, then by ID. Every "nearest" be
 
 1. **Normalise.** An empty order is rejected (`EMPTY_ORDER`). Each line is checked before merging: an unknown product is rejected (`UNKNOWN_PRODUCT`), and a quantity that is not a positive integer is rejected (`INVALID_QUANTITY`). Duplicate product lines are then merged, and the lines are sorted by product ID.
 2. **Eligibility.** For each product, a warehouse is eligible if it holds the product in stock and, for cold-chain products, has both cold storage and a refrigerated fleet (`canShip`). Each exclusion is recorded with its reason: `NO_STOCK` when the warehouse has no stock of the product, otherwise `NO_COLD_CHAIN`. Exclusions are listed per product, in warehouse order.
-3. **Single warehouse.** If one or more eligible warehouses can supply every product in the full quantity, the nearest of them is selected.
-4. **Split.** Otherwise, each product is allocated from the nearest eligible warehouse first, then from the next nearest until the quantity is covered. Allocations are grouped by warehouse, one shipment per warehouse. Shipments are listed in warehouse order, and items in product ID order.
-5. **Shortfall.** Quantity that remains unallocated is reported per product, with `available` set to the allocated quantity. The status is `FULL` when nothing remains, `PARTIAL` when some quantity remains, and `UNFULFILLABLE` when nothing is allocated.
-6. **Metrics.** `shipmentCount` is the number of shipments. `totalDistanceKm` is the sum of the shipment distances, rounded to two decimals.
-7. **Explanation.** The explanation is built from the results of steps 2–5 (§7.3).
+3. **City groups.** The warehouses of one city form a group that delivers to the customer through one hub warehouse. If the order contains a cold-chain product and the city has a warehouse that can ship cold chain, the hub is the nearest such warehouse; otherwise the hub is the nearest warehouse of the city. A group supplies a product from its eligible members only when the hub can ship that product (`canShip`), so cold-chain products move only between warehouses that can ship cold chain. Within a group, stock is taken from the hub first, then from the other members, nearest first. Stock taken from a member other than the hub is a transfer to the hub. Groups are ordered by the hub's distance, then by hub ID. Distances between warehouses are not known, so only the hub's distance to the customer is counted.
+4. **Single group.** If one or more groups can supply every product in the full quantity, the nearest of them is selected. With one warehouse per city, this is the nearest single warehouse.
+5. **Split.** Otherwise, each product is allocated from the nearest group first, then from the next nearest until the quantity is covered. Allocations are grouped by hub, one shipment per hub. Shipments are listed in warehouse order, and items in product ID order.
+6. **Shortfall.** Quantity that remains unallocated is reported per product, with `available` set to the allocated quantity. The status is `FULL` when nothing remains, `PARTIAL` when some quantity remains, and `UNFULFILLABLE` when nothing is allocated.
+7. **Metrics.** `shipmentCount` is the number of shipments. `totalDistanceKm` is the sum of the shipment distances, rounded to two decimals.
+8. **Explanation.** The explanation is built from the results of steps 2–6 (§7.3).
 
 ### 7.3 Explanation generation
 
@@ -259,9 +261,11 @@ Explanations are generated from fixed templates and are deterministic. They are 
    - Split: "Split across 2 warehouses because no single warehouse can supply the whole order. Each product is taken from the nearest eligible warehouse first."
    - Split with one shipment (partial order): "Shipped from 1 warehouse (W04, 30 km). No warehouse can supply the whole order."
    - Nothing allocated: "No eligible warehouse has stock of the ordered products, so nothing can be shipped."
+   - Single group with transfers: "Fulfilled with 1 delivery from W01 (5 km). Warehouses in Surabaya together supply the whole order."
 2. **Cold-chain exclusions**, one line per warehouse with a `NO_COLD_CHAIN` exclusion: "W02 (12 km) holds Vaccine — Hepatitis B (10-dose vial) but has no refrigerated fleet, so it cannot deliver cold-chain products." `NO_STOCK` exclusions are not explained.
-3. **Allocation**, one line per allocated product: "Vaccine — Hepatitis B (10-dose vial): 40 from W04 (30 km), 8 from W07 (45 km) and 60 from W08 (150 km)."
-4. **Shortfall**, one line per product with a shortfall: "Vaccine — Hepatitis B (10-dose vial): 108 of 120 can be shipped, 12 short. W02 and W06 hold 50 more but cannot deliver cold-chain products." The second sentence appears only when warehouses with a `NO_COLD_CHAIN` exclusion hold the product.
+3. **Transit**, one line per transfer: "W02 sends 20 Surgical Gloves (Box of 100) to W01 for transit. W01 delivers them to the customer."
+4. **Allocation**, one line per allocated product. Stock that moves through a hub names both warehouses: "Surgical Gloves (Box of 100): 200 from W01 (5 km) and 20 from W02 through W01 (5 km)." Other example: "Vaccine — Hepatitis B (10-dose vial): 40 from W04 (30 km), 8 from W07 (45 km) and 60 from W08 (150 km)."
+5. **Shortfall**, one line per product with a shortfall: "Vaccine — Hepatitis B (10-dose vial): 108 of 120 can be shipped, 12 short. W02 and W06 hold 50 more but cannot deliver cold-chain products." The second sentence appears only when warehouses with a `NO_COLD_CHAIN` exclusion hold the product.
 
 ### 7.4 Worked examples (sample data)
 
@@ -271,8 +275,19 @@ Explanations are generated from fixed templates and are deterministic. They are 
 | B | Gloves 100, Hep B 10 | **W01** (gloves) + **W04** (Hep B) | No eligible warehouse supplies both. W02 holds both but has no refrigerated fleet. W04 is the nearest cold-chain warehouse. |
 | C | Hep B 10, Tetanus 10 | **W04** | Nearest cold-chain warehouse that supplies both vaccines. |
 | D | Hep B 120 | **W04** 40 + **W07** 8 + **W08** 60 → **PARTIAL**, short 12 | Cold-chain eligible stock totals 108 vials. Stock at W02 and W06 is excluded. |
+| E | Gloves 220, Syringe 100 | **W01** (5 km), with 20 gloves moved from W02 to W01 | W01 has 200 gloves and W02 has 50. Together the Surabaya group covers the order, so W01 delivers it in one trip. Without the city group, W03 (25 km) would be selected. |
 
 These examples form the core of the engine's unit test suite.
+
+The sample data has no city with a warehouse that can ship cold chain, so example E moves only a normal product. Cold-chain transit is shown with test data in `tests/api/evaluate.test.ts`:
+
+| Warehouse | Distance | Cold storage | Refrigerated fleet | Stock of the test vaccine |
+|---|---|---|---|---|
+| A | 1 km | ✅ | – | 5 |
+| B | 2 km | ✅ | ✅ | 6 |
+| C | 3 km | ✅ | ✅ | 4 |
+
+All three are in one city. For an order of 12 vials, B is the hub as the nearest warehouse that can ship cold chain. C transfers 4 vials to B, and B delivers 10 in one shipment. A is excluded with `NO_COLD_CHAIN`, and its stock is not transferred. The status is `PARTIAL`, with a shortfall of 2.
 
 ### 7.5 Known limitations
 
@@ -280,7 +295,7 @@ These examples form the core of the engine's unit test suite.
 |---|---|---|
 | Hep B 45, Tetanus 20 | **W08** (150 km) | A single warehouse is preferred even when W04 + W07 (30 km + 45 km) cover the order. |
 | Paracetamol 400 | **W05** (90 km) | A single warehouse is preferred even when W01 + W04 (5 km + 30 km) cover the order. |
-| Gloves 600 | **W01**, **W02**, **W03**, **W07** | Nearest-first allocation uses four warehouses where W01 + W05 cover the order with two. |
+| Gloves 600 | **W01** (with W02's 50 moved to W01), **W03**, **W07** | Nearest-first allocation uses three deliveries where W01 + W05 cover the order with two. |
 
 ---
 
@@ -308,6 +323,7 @@ Response `200`:
     { "warehouseId": "W01", "distanceKm": 5,  "items": [{ "productId": "P001", "quantity": 100 }] },
     { "warehouseId": "W04", "distanceKm": 30, "items": [{ "productId": "P002", "quantity": 10 }] }
   ],
+  "transfers": [],
   "unfulfilled": [],
   "metrics": { "shipmentCount": 2, "totalDistanceKm": 35 },
   "explanation": [
@@ -474,13 +490,14 @@ pharma-distribution-platform/
 - `canShip`: cold-chain products need cold storage and a refrigerated fleet; other products ship from any warehouse.
 - Worked examples A–D (§7.4): exact shipments, status, shortfall and metrics. Example B also checks the `NO_COLD_CHAIN` exclusions of W02 and W06 and the full explanation; example D checks the shortfall line.
 - `UNFULFILLABLE` when no eligible warehouse has stock.
+- Same-city transit: example E with its transfer and explanation; Gloves 600 in three deliveries; no transfer of cold-chain products to or from a warehouse without cold chain; the cold-chain warehouse of a city is the hub for an order with a cold-chain product, and the nearest warehouse otherwise.
 - Input validation: duplicate lines merged; empty order, unknown product and zero, negative and non-integer quantities rejected with the matching `OrderError` code; each line is checked before merging.
 - Determinism: reversed order lines and reversed warehouse order produce identical output.
 
 **API integration tests (Vitest, local PostgreSQL):** the tests call the route handlers directly and assert response bodies and status codes. They run against the database in `DATABASE_URL` (read from `.env`) and are started with `npm test`.
 
 - CRUD (`tests/api/crud.test.ts`): create, read, list, update and delete for categories, products, warehouses and stock. Error cases: invalid input, empty update and malformed JSON (`400`), missing record (`404`), duplicate category name or stock row, unknown reference on create or update and delete of a referenced record (`409`). The generated ID format is checked, and an `id` sent on create is ignored. For stock, the tests also check that a quantity of zero is accepted, that an update does not change the warehouse or product of the row, and that an update sets `updated_at`.
-- Order evaluation (`tests/api/evaluate.test.ts`): example B from the seed data returns `200` with the exact shipments, metrics and the `NO_COLD_CHAIN` exclusion of W02; an evaluation leaves the stock unchanged; an unknown product returns `422`; an empty order, a zero or non-integer quantity and malformed JSON return `400`. Orders that cannot be fulfilled in full: a product without stock is `UNFULFILLABLE`; an order with one product in stock and one without is `PARTIAL`; Hepatitis B × 120 is `PARTIAL` with 108 shipped from W04, W07 and W08. Cold chain: Tetanus Toxoid ships from W04 and W02 and W06 are excluded with `NO_COLD_CHAIN`; gloves ship from W01, which has no cold storage; a cold-chain product held only by W01 and W02 is `UNFULFILLABLE`. Two test products are created for these cases and deleted with their stock afterwards.
+- Order evaluation (`tests/api/evaluate.test.ts`): example B from the seed data returns `200` with the exact shipments, metrics and the `NO_COLD_CHAIN` exclusion of W02; an evaluation leaves the stock unchanged; an unknown product returns `422`; an empty order, a zero or non-integer quantity and malformed JSON return `400`. Orders that cannot be fulfilled in full: a product without stock is `UNFULFILLABLE`; an order with one product in stock and one without is `PARTIAL`; Hepatitis B × 120 is `PARTIAL` with 108 shipped from W04, W07 and W08. Cold chain: Tetanus Toxoid ships from W04 and W02 and W06 are excluded with `NO_COLD_CHAIN`; gloves ship from W01, which has no cold storage; a cold-chain product held only by W01 and W02 is `UNFULFILLABLE`. Two test products are created for these cases and deleted with their stock afterwards. Same-city transit: Gloves 220 + Syringe 100 is one shipment from W01, with 20 gloves moved from W02. A cold-chain warehouse added to Surabaya for one test becomes the hub for an order with a cold-chain product, and W01's gloves move to it; the warehouse is deleted after that test. A test city with one warehouse without a refrigerated fleet and two cold-chain warehouses shows that a cold-chain product moves between the two cold-chain warehouses, that the nearest cold-chain warehouse is the hub, and that the stock of the warehouse without a refrigerated fleet stays excluded.
 - Test records have names starting with `Test`. Their generated IDs are kept during the run and the records are deleted by those IDs afterwards. Seed data is not modified.
 
 **Smoke test:** the UI presets are run against the deployed URL.

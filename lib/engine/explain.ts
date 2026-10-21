@@ -1,12 +1,13 @@
 import { stockOf } from "./eligibility";
 import type { Selection } from "./select";
-import type { Exclusion, OrderLine, Shipment, Shortfall, Snapshot, Status, Warehouse } from "./types";
+import type { Exclusion, OrderLine, Shipment, Shortfall, Snapshot, Status, Transfer, Warehouse } from "./types";
 
 type ExplainInput = {
   lines: OrderLine[];
   warehouses: Warehouse[]; // nearest first
   selection: Selection;
   shipments: Shipment[];
+  transfers: Transfer[];
   unfulfilled: Shortfall[];
   excluded: Exclusion[];
   status: Status;
@@ -25,9 +26,9 @@ function missingCapability(warehouse: Warehouse) {
 }
 
 // Builds the explanation from fixed templates in this order: outcome, cold-chain
-// exclusions, allocation per product, shortfall per product.
+// exclusions, transit, allocation per product, shortfall per product.
 export function explain(input: ExplainInput, snapshot: Snapshot): string[] {
-  const { lines, warehouses, selection, shipments, unfulfilled, excluded, status } = input;
+  const { lines, warehouses, selection, shipments, transfers, unfulfilled, excluded, status } = input;
   const name = (productId: string) => snapshot.products.get(productId)!.name;
   const coldChainExcluded = excluded.filter((e) => e.reason === "NO_COLD_CHAIN");
   const explanation: string[] = [];
@@ -35,6 +36,11 @@ export function explain(input: ExplainInput, snapshot: Snapshot): string[] {
   // Outcome
   if (status === "UNFULFILLABLE") {
     explanation.push("No eligible warehouse has stock of the ordered products, so nothing can be shipped.");
+  } else if (selection.mode === "SINGLE" && transfers.length > 0) {
+    const hub = selection.allocations[0].hub;
+    explanation.push(
+      `Fulfilled with 1 delivery from ${place(hub)}. Warehouses in ${hub.city} together supply the whole order.`,
+    );
   } else if (selection.mode === "SINGLE") {
     const warehouse = shipments[0];
     explanation.push(
@@ -62,11 +68,22 @@ export function explain(input: ExplainInput, snapshot: Snapshot): string[] {
     );
   }
 
+  // Transit, one line per transfer
+  for (const { fromWarehouseId, toWarehouseId, productId, quantity } of transfers) {
+    explanation.push(
+      `${fromWarehouseId} sends ${quantity} ${name(productId)} to ${toWarehouseId} for transit. ${toWarehouseId} delivers them to the customer.`,
+    );
+  }
+
   // Allocation, one line per product
   for (const { productId } of lines) {
     const parts = selection.allocations
       .filter((a) => a.productId === productId)
-      .map((a) => `${a.quantity} from ${place(a.warehouse)}`);
+      .map((a) =>
+        a.warehouse === a.hub
+          ? `${a.quantity} from ${place(a.warehouse)}`
+          : `${a.quantity} from ${a.warehouse.id} through ${place(a.hub)}`,
+      );
     if (parts.length === 0) continue;
     explanation.push(`${name(productId)}: ${joinList(parts)}.`);
   }

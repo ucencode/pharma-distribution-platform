@@ -8,6 +8,7 @@ import {
   type OrderLine,
   type Shipment,
   type Shortfall,
+  type Transfer,
   type Snapshot,
   type Status,
 } from "./types";
@@ -48,16 +49,30 @@ export function evaluate(order: Order, snapshot: Snapshot): Decision {
   const { eligible, excluded } = eligibility(lines, warehouses, snapshot);
   const selection = select(lines, eligible, snapshot);
 
-  // One shipment per warehouse, nearest first, items in product ID order.
+  // One shipment per hub, nearest first, items in product ID order.
   const shipments: Shipment[] = [];
-  for (const warehouse of warehouses) {
-    const items = selection.allocations
-      .filter((a) => a.warehouse.id === warehouse.id)
-      .map(({ productId, quantity }) => ({ productId, quantity }));
+  for (const hub of warehouses) {
+    const items = lines
+      .map(({ productId }) => ({
+        productId,
+        quantity: selection.allocations
+          .filter((a) => a.hub.id === hub.id && a.productId === productId)
+          .reduce((sum, a) => sum + a.quantity, 0),
+      }))
+      .filter((item) => item.quantity > 0);
     if (items.length > 0) {
-      shipments.push({ warehouseId: warehouse.id, distanceKm: warehouse.distanceToCustomerKm, items });
+      shipments.push({ warehouseId: hub.id, distanceKm: hub.distanceToCustomerKm, items });
     }
   }
+
+  const transfers: Transfer[] = selection.allocations
+    .filter((a) => a.warehouse.id !== a.hub.id)
+    .map((a) => ({
+      fromWarehouseId: a.warehouse.id,
+      toWarehouseId: a.hub.id,
+      productId: a.productId,
+      quantity: a.quantity,
+    }));
 
   const unfulfilled: Shortfall[] = [];
   for (const { productId, quantity } of lines) {
@@ -75,13 +90,14 @@ export function evaluate(order: Order, snapshot: Snapshot): Decision {
     Math.round(shipments.reduce((sum, s) => sum + s.distanceKm, 0) * 100) / 100;
 
   const explanation = explain(
-    { lines, warehouses, selection, shipments, unfulfilled, excluded, status },
+    { lines, warehouses, selection, shipments, transfers, unfulfilled, excluded, status },
     snapshot,
   );
 
   return {
     status,
     shipments,
+    transfers,
     unfulfilled,
     metrics: { shipmentCount: shipments.length, totalDistanceKm },
     explanation,

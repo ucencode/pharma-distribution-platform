@@ -63,6 +63,13 @@ export default function ResultCard({
                   </li>
                 ))}
               </ul>
+              {decision.transfers
+                .filter((t) => t.toWarehouseId === s.warehouseId)
+                .map((t) => (
+                  <p key={`${t.fromWarehouseId}-${t.productId}`} className={`${muted} mt-2`}>
+                    Transit: {t.quantity} {product(t.productId)?.name ?? t.productId} from {t.fromWarehouseId}
+                  </p>
+                ))}
             </div>
           ))}
         </div>

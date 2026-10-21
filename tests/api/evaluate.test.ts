@@ -1,7 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, db } from "@/lib/db/client";
-import { inventory, products } from "@/lib/db/schema";
+import { inventory, products, warehouses } from "@/lib/db/schema";
 import { POST } from "@/app/api/orders/evaluate/route";
 
 // The tests use the seed data and do not change it. Two test products are added for the
@@ -148,6 +148,125 @@ describe("POST /api/orders/evaluate", () => {
         "Vaccine — Hepatitis B (10-dose vial): 108 of 120 can be shipped, 12 short. W02 and W06 hold 50 more but cannot deliver cold-chain products.",
       );
     });
+  });
+
+  it("delivers gloves and syringes once from W01, with W02's gloves moved to W01 first", async () => {
+    const decision = await evaluate({
+      items: [
+        { productId: "P001", quantity: 220 },
+        { productId: "P003", quantity: 100 },
+      ],
+    });
+    expect(decision.status).toBe("FULL");
+    expect(decision.shipments).toEqual([
+      {
+        warehouseId: "W01",
+        distanceKm: 5,
+        items: [
+          { productId: "P001", quantity: 220 },
+          { productId: "P003", quantity: 100 },
+        ],
+      },
+    ]);
+    expect(decision.transfers).toEqual([
+      { fromWarehouseId: "W02", toWarehouseId: "W01", productId: "P001", quantity: 20 },
+    ]);
+  });
+
+  it("uses a cold-chain warehouse in Surabaya as the hub when the order has a cold-chain product", async () => {
+    // A cold-chain warehouse in Surabaya changes the hub for every cold-chain order, so it
+    // exists only during this test.
+    const [hub] = await db
+      .insert(warehouses)
+      .values({
+        city: "Surabaya",
+        distanceToCustomerKm: 15,
+        hasColdStorage: true,
+        hasRefrigeratedFleet: true,
+      })
+      .returning();
+    const [vaccine] = await db
+      .insert(products)
+      .values({ name: "Test Hub Vaccine", categoryId: "C02", requiresColdChain: true })
+      .returning();
+    try {
+      await db.insert(inventory).values({ warehouseId: hub.id, productId: vaccine.id, quantity: 10 });
+
+      const decision = await evaluate({
+        items: [
+          { productId: "P001", quantity: 100 },
+          { productId: vaccine.id, quantity: 10 },
+        ],
+      });
+      expect(decision.status).toBe("FULL");
+      expect(decision.shipments).toEqual([
+        {
+          warehouseId: hub.id,
+          distanceKm: 15,
+          items: [
+            { productId: "P001", quantity: 100 },
+            { productId: vaccine.id, quantity: 10 },
+          ],
+        },
+      ]);
+      expect(decision.transfers).toEqual([
+        { fromWarehouseId: "W01", toWarehouseId: hub.id, productId: "P001", quantity: 100 },
+      ]);
+    } finally {
+      await db.delete(inventory).where(eq(inventory.warehouseId, hub.id));
+      await db.delete(products).where(eq(products.id, vaccine.id));
+      await db.delete(warehouses).where(eq(warehouses.id, hub.id));
+    }
+  });
+
+  it("moves a cold-chain product only between cold-chain warehouses of the same city", async () => {
+    // One city with three warehouses: the nearest has no cold chain, the other two do.
+    // They hold only a test product, so other orders are not affected.
+    const created = await db
+      .insert(warehouses)
+      .values([
+        { city: "Test Transit City", distanceToCustomerKm: 1, hasColdStorage: true, hasRefrigeratedFleet: false },
+        { city: "Test Transit City", distanceToCustomerKm: 2, hasColdStorage: true, hasRefrigeratedFleet: true },
+        { city: "Test Transit City", distanceToCustomerKm: 3, hasColdStorage: true, hasRefrigeratedFleet: true },
+      ])
+      .returning();
+    const [noFleet, hub, other] = created;
+    const [vaccine] = await db
+      .insert(products)
+      .values({ name: "Test Transit Vaccine", categoryId: "C02", requiresColdChain: true })
+      .returning();
+    try {
+      await db.insert(inventory).values([
+        { warehouseId: noFleet.id, productId: vaccine.id, quantity: 5 },
+        { warehouseId: hub.id, productId: vaccine.id, quantity: 6 },
+        { warehouseId: other.id, productId: vaccine.id, quantity: 4 },
+      ]);
+
+      const decision = await evaluate({ items: [{ productId: vaccine.id, quantity: 12 }] });
+
+      // The hub is the nearest cold-chain warehouse, not the nearest warehouse. The stock
+      // of the warehouse without a refrigerated fleet is not moved.
+      expect(decision.status).toBe("PARTIAL");
+      expect(decision.shipments).toEqual([
+        { warehouseId: hub.id, distanceKm: 2, items: [{ productId: vaccine.id, quantity: 10 }] },
+      ]);
+      expect(decision.transfers).toEqual([
+        { fromWarehouseId: other.id, toWarehouseId: hub.id, productId: vaccine.id, quantity: 4 },
+      ]);
+      expect(decision.unfulfilled).toEqual([{ productId: vaccine.id, requested: 12, available: 10 }]);
+      expect(decision.excluded).toContainEqual({
+        warehouseId: noFleet.id,
+        productId: vaccine.id,
+        reason: "NO_COLD_CHAIN",
+      });
+      expect(decision.explanation).toContain(
+        `${other.id} sends 4 Test Transit Vaccine to ${hub.id} for transit. ${hub.id} delivers them to the customer.`,
+      );
+    } finally {
+      await db.delete(inventory).where(eq(inventory.productId, vaccine.id));
+      await db.delete(products).where(eq(products.id, vaccine.id));
+      await db.delete(warehouses).where(inArray(warehouses.id, created.map((w) => w.id)));
+    }
   });
 
   describe("cold chain", () => {

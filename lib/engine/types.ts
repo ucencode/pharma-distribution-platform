@@ -25,6 +25,9 @@ export type Exclusion = { warehouseId: string; productId: string; reason: Exclus
 
 export type Shipment = { warehouseId: string; distanceKm: number; items: OrderLine[] };
 
+// Stock moved to the hub of the same city before the hub delivers it to the customer.
+export type Transfer = { fromWarehouseId: string; toWarehouseId: string; productId: string; quantity: number };
+
 export type Shortfall = { productId: string; requested: number; available: number };
 
 export type Status = "FULL" | "PARTIAL" | "UNFULFILLABLE";
@@ -32,6 +35,7 @@ export type Status = "FULL" | "PARTIAL" | "UNFULFILLABLE";
 export type Decision = {
   status: Status;
   shipments: Shipment[];
+  transfers: Transfer[];
   unfulfilled: Shortfall[];
   metrics: { shipmentCount: number; totalDistanceKm: number };
   explanation: string[];
