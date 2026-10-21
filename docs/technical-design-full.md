@@ -130,7 +130,7 @@ Cold-chain handling is a product attribute (`requires_cold_chain`) and is indepe
 
 Route handler configuration:
 
-- Route handlers set `export const dynamic = "force-dynamic"` and `runtime = "nodejs"`, so inventory is never served from a static cache.
+- Route handlers declare no `dynamic` or `runtime` segment config. Cache Components is enabled, which does not allow these options; handlers run on the default Node.js runtime, and `POST` handlers are never cached.
 - Each request loads the full snapshot with three queries. No caching layer is used.
 
 ---
@@ -480,6 +480,7 @@ pharma-distribution-platform/
 **API integration tests (Vitest, local PostgreSQL):** the tests call the route handlers directly and assert response bodies and status codes. They run against the database in `DATABASE_URL` (read from `.env`) and are started with `npm test`.
 
 - CRUD (`tests/api/crud.test.ts`): create, read, list, update and delete for categories, products, warehouses and stock. Error cases: invalid input, empty update and malformed JSON (`400`), missing record (`404`), duplicate category name or stock row, unknown reference on create or update and delete of a referenced record (`409`). The generated ID format is checked, and an `id` sent on create is ignored. For stock, the tests also check that a quantity of zero is accepted, that an update does not change the warehouse or product of the row, and that an update sets `updated_at`.
+- Order evaluation (`tests/api/evaluate.test.ts`): example B from the seed data returns `200` with the exact shipments, metrics and the `NO_COLD_CHAIN` exclusion of W02; an evaluation leaves the stock unchanged; an unknown product returns `422`; an empty order, a zero or non-integer quantity and malformed JSON return `400`.
 - Test records have names starting with `Test`. Their generated IDs are kept during the run and the records are deleted by those IDs afterwards. Seed data is not modified.
 
 **Smoke test:** the UI presets are run against the deployed URL.
