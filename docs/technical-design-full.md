@@ -199,6 +199,16 @@ Notes:
 ### 7.1 Interfaces
 
 ```ts
+type Product = { id: string; name: string; requiresColdChain: boolean };
+
+type Warehouse = {
+  id: string;
+  city: string;
+  distanceToCustomerKm: number;
+  hasColdStorage: boolean;
+  hasRefrigeratedFleet: boolean;
+};
+
 type Order = { items: { productId: string; quantity: number }[] };
 
 type Snapshot = {
@@ -219,25 +229,39 @@ type Decision = {
   explanation: string[];
   excluded: { warehouseId: string; productId: string; reason: "NO_STOCK" | "NO_COLD_CHAIN" }[];
 };
+
+class OrderError extends Error {
+  code: "EMPTY_ORDER" | "INVALID_QUANTITY" | "UNKNOWN_PRODUCT";
+  productId?: string;
+}
 ```
+
+`evaluate(order, snapshot)` returns a `Decision` or throws an `OrderError` when the order is invalid. `Product` and `Warehouse` use the field names of the Drizzle row types, so database rows can be passed in without mapping. `evaluate` does not change the snapshot.
 
 ### 7.2 Selection rule
 
-1. **Normalise.** Duplicate product lines are merged. Unknown products and quantities of zero or less are rejected.
-2. **Eligibility.** For each product, a warehouse is eligible if it holds the product in stock and, for cold-chain products, has both cold storage and a refrigerated fleet (`canShip`). Each exclusion is recorded with its reason.
+Warehouses are ordered by `distanceToCustomerKm`, then by ID. Every "nearest" below refers to this order.
+
+1. **Normalise.** An empty order is rejected (`EMPTY_ORDER`). Each line is checked before merging: an unknown product is rejected (`UNKNOWN_PRODUCT`), and a quantity that is not a positive integer is rejected (`INVALID_QUANTITY`). Duplicate product lines are then merged, and the lines are sorted by product ID.
+2. **Eligibility.** For each product, a warehouse is eligible if it holds the product in stock and, for cold-chain products, has both cold storage and a refrigerated fleet (`canShip`). Each exclusion is recorded with its reason: `NO_STOCK` when the warehouse has no stock of the product, otherwise `NO_COLD_CHAIN`. Exclusions are listed per product, in warehouse order.
 3. **Single warehouse.** If one or more eligible warehouses can supply every product in the full quantity, the nearest of them is selected.
-4. **Split.** Otherwise, each product is allocated from the nearest eligible warehouse first, then from the next nearest until the quantity is covered. Allocations are grouped by warehouse, one shipment per warehouse.
-5. **Shortfall.** Quantity that remains unallocated is reported per product. The status is `FULL` when nothing remains, `PARTIAL` when some quantity remains, and `UNFULFILLABLE` when nothing is allocated.
-6. **Explanation.** The explanation is built from the results of steps 2–5 (§7.3).
+4. **Split.** Otherwise, each product is allocated from the nearest eligible warehouse first, then from the next nearest until the quantity is covered. Allocations are grouped by warehouse, one shipment per warehouse. Shipments are listed in warehouse order, and items in product ID order.
+5. **Shortfall.** Quantity that remains unallocated is reported per product, with `available` set to the allocated quantity. The status is `FULL` when nothing remains, `PARTIAL` when some quantity remains, and `UNFULFILLABLE` when nothing is allocated.
+6. **Metrics.** `shipmentCount` is the number of shipments. `totalDistanceKm` is the sum of the shipment distances, rounded to two decimals.
+7. **Explanation.** The explanation is built from the results of steps 2–5 (§7.3).
 
 ### 7.3 Explanation generation
 
 Explanations are generated from fixed templates and are deterministic. They are composed in this order:
 
-1. **Outcome:** "Fulfilled from 1 warehouse (W01, 5 km)." or "Split across 2 warehouses because no single warehouse can cover the whole order."
-2. **Relevant exclusions:** "W02 (12 km) has Hepatitis B vaccine in refrigerated storage but no refrigerated vehicles, so it cannot deliver cold-chain items."
-3. **Allocation:** "Surgical gloves from W01, the nearest warehouse with stock (5 km)."
-4. **Shortfall (if any):** "Only 108 of 120 Hepatitis B vials can be shipped. W02/W06 hold 50 more but cannot ship cold-chain."
+1. **Outcome**, one line:
+   - Single warehouse: "Fulfilled from 1 warehouse (W01, 5 km), the nearest warehouse that can supply the whole order."
+   - Split: "Split across 2 warehouses because no single warehouse can supply the whole order. Each product is taken from the nearest eligible warehouse first."
+   - Split with one shipment (partial order): "Shipped from 1 warehouse (W04, 30 km). No warehouse can supply the whole order."
+   - Nothing allocated: "No eligible warehouse has stock of the ordered products, so nothing can be shipped."
+2. **Cold-chain exclusions**, one line per warehouse with a `NO_COLD_CHAIN` exclusion: "W02 (12 km) holds Vaccine — Hepatitis B (10-dose vial) but has no refrigerated fleet, so it cannot deliver cold-chain products." `NO_STOCK` exclusions are not explained.
+3. **Allocation**, one line per allocated product: "Vaccine — Hepatitis B (10-dose vial): 40 from W04 (30 km), 8 from W07 (45 km) and 60 from W08 (150 km)."
+4. **Shortfall**, one line per product with a shortfall: "Vaccine — Hepatitis B (10-dose vial): 108 of 120 can be shipped, 12 short. W02 and W06 hold 50 more but cannot deliver cold-chain products." The second sentence appears only when warehouses with a `NO_COLD_CHAIN` exclusion hold the product.
 
 ### 7.4 Worked examples (sample data)
 
@@ -286,14 +310,22 @@ Response `200`:
   ],
   "unfulfilled": [],
   "metrics": { "shipmentCount": 2, "totalDistanceKm": 35 },
-  "excluded": [
-    { "warehouseId": "W02", "productId": "P002", "reason": "NO_COLD_CHAIN" },
-    { "warehouseId": "W06", "productId": "P002", "reason": "NO_COLD_CHAIN" }
-  ],
   "explanation": [
-    "Split across 2 warehouses: no single warehouse can deliver both surgical gloves and Hepatitis B vaccine.",
-    "W02 (12 km) stocks both items but has no refrigerated vehicles, so it cannot deliver the vaccine.",
-    "Gloves from W01 (closest, 5 km). Vaccine from W04 (closest cold-chain warehouse, 30 km)."
+    "Split across 2 warehouses because no single warehouse can supply the whole order. Each product is taken from the nearest eligible warehouse first.",
+    "W02 (12 km) holds Vaccine — Hepatitis B (10-dose vial) but has no refrigerated fleet, so it cannot deliver cold-chain products.",
+    "W06 (95 km) holds Vaccine — Hepatitis B (10-dose vial) but has no refrigerated fleet, so it cannot deliver cold-chain products.",
+    "Surgical Gloves (Box of 100): 100 from W01 (5 km).",
+    "Vaccine — Hepatitis B (10-dose vial): 10 from W04 (30 km)."
+  ],
+  "excluded": [
+    { "warehouseId": "W04", "productId": "P001", "reason": "NO_STOCK" },
+    { "warehouseId": "W06", "productId": "P001", "reason": "NO_STOCK" },
+    { "warehouseId": "W08", "productId": "P001", "reason": "NO_STOCK" },
+    { "warehouseId": "W01", "productId": "P002", "reason": "NO_STOCK" },
+    { "warehouseId": "W02", "productId": "P002", "reason": "NO_COLD_CHAIN" },
+    { "warehouseId": "W03", "productId": "P002", "reason": "NO_STOCK" },
+    { "warehouseId": "W05", "productId": "P002", "reason": "NO_STOCK" },
+    { "warehouseId": "W06", "productId": "P002", "reason": "NO_COLD_CHAIN" }
   ]
 }
 ```
@@ -419,7 +451,9 @@ pharma-distribution-platform/
 │  ├─ migrations/                   # drizzle-kit output
 │  └─ seed.ts
 ├─ tests/
-│  ├─ engine/*.test.ts              # unit: examples A–D + edge cases
+│  ├─ engine/
+│  │  ├─ evaluate.test.ts           # unit: examples A–D + edge cases
+│  │  └─ sample.ts                  # sample data as a Snapshot, no database
 │  └─ api/
 │     ├─ crud.test.ts               # integration: CRUD endpoints
 │     └─ evaluate.test.ts           # integration: order evaluation
@@ -435,15 +469,13 @@ pharma-distribution-platform/
 
 ## 12. Testing strategy
 
-**Engine unit tests (Vitest, no database):**
+**Engine unit tests (Vitest, no database):** the tests in `tests/engine/evaluate.test.ts` build the sample data as a `Snapshot` by hand (`tests/engine/sample.ts`).
 
-- Worked examples A–D (§7.4): exact warehouses, allocations and status.
-- Cold chain: vaccines are never allocated to W02 or W06. Non-cold-chain products are allocated from them.
-- Single-warehouse preference: when several warehouses can supply the whole order, the nearest is selected.
-- Split allocation: each product is taken from the nearest eligible warehouse first.
-- Partial fulfilment: shortfall calculation, and `UNFULFILLABLE` when no stock is eligible.
-- Input validation: duplicate lines merged; zero, negative and non-integer quantities rejected; unknown product; empty order.
-- Determinism: shuffled input order produces identical output.
+- `canShip`: cold-chain products need cold storage and a refrigerated fleet; other products ship from any warehouse.
+- Worked examples A–D (§7.4): exact shipments, status, shortfall and metrics. Example B also checks the `NO_COLD_CHAIN` exclusions of W02 and W06 and the full explanation; example D checks the shortfall line.
+- `UNFULFILLABLE` when no eligible warehouse has stock.
+- Input validation: duplicate lines merged; empty order, unknown product and zero, negative and non-integer quantities rejected with the matching `OrderError` code; each line is checked before merging.
+- Determinism: reversed order lines and reversed warehouse order produce identical output.
 
 **API integration tests (Vitest, local PostgreSQL):** the tests call the route handlers directly and assert response bodies and status codes. They run against the database in `DATABASE_URL` (read from `.env`) and are started with `npm test`.
 
