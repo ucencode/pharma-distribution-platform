@@ -8,6 +8,13 @@
       "when": 1792547341859,
       "tag": "0000_great_warbird",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792554815288,
+      "tag": "0001_abnormal_annihilus",
+      "breakpoints": true
     }
   ]
 }

@@ -41,6 +41,15 @@ const inventoryRows = Object.entries(stock).flatMap(([warehouseId, items]) =>
   Object.entries(items).map(([productId, quantity]) => ({ warehouseId, productId, quantity })),
 );
 
+// The seed inserts fixed IDs, so each sequence is moved past the highest one
+// to keep generated IDs from colliding with them.
+const syncSequence = (table: string, prefix: string) =>
+  db.execute(
+    sql.raw(
+      `SELECT setval('${table}_id_seq', coalesce((SELECT max(substring(id from 2)::bigint) FROM ${table} WHERE id ~ '^${prefix}[0-9]+$'), 0) + 1, false)`,
+    ),
+  );
+
 async function main() {
   await db
     .insert(categories)
@@ -79,6 +88,10 @@ async function main() {
       target: [inventory.warehouseId, inventory.productId],
       set: { quantity: sql`excluded.quantity`, updatedAt: sql`now()` },
     });
+
+  await syncSequence("categories", "C");
+  await syncSequence("products", "P");
+  await syncSequence("warehouses", "W");
 
   console.log(
     `Seeded ${categoryRows.length} categories, ${productRows.length} products, ${warehouseRows.length} warehouses, ${inventoryRows.length} stock rows.`,

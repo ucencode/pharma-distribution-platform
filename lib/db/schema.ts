@@ -4,19 +4,31 @@ import {
   check,
   integer,
   numeric,
+  pgSequence,
   pgTable,
   primaryKey,
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
 
+// IDs are generated from a sequence and zero-padded by padded_id() (see migration 0001),
+// e.g. C01, P001, W01.
+const generatedId = (prefix: string, sequence: string, width: number) =>
+  text("id")
+    .primaryKey()
+    .default(sql.raw(`padded_id('${prefix}', nextval('${sequence}'), ${width})`));
+
+export const categoriesIdSeq = pgSequence("categories_id_seq");
+export const productsIdSeq = pgSequence("products_id_seq");
+export const warehousesIdSeq = pgSequence("warehouses_id_seq");
+
 export const categories = pgTable("categories", {
-  id: text("id").primaryKey(),
+  id: generatedId("C", "categories_id_seq", 2),
   name: text("name").notNull().unique(),
 });
 
 export const products = pgTable("products", {
-  id: text("id").primaryKey(),
+  id: generatedId("P", "products_id_seq", 3),
   name: text("name").notNull(),
   categoryId: text("category_id")
     .notNull()
@@ -27,7 +39,7 @@ export const products = pgTable("products", {
 export const warehouses = pgTable(
   "warehouses",
   {
-    id: text("id").primaryKey(),
+    id: generatedId("W", "warehouses_id_seq", 2),
     city: text("city").notNull(),
     distanceToCustomerKm: numeric("distance_to_customer_km", {
       precision: 7,
