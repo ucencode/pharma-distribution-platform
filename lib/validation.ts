@@ -39,3 +39,14 @@ export const inventoryCreateSchema = z.object({
 });
 
 export const inventoryUpdateSchema = inventoryCreateSchema.pick({ quantity: true });
+
+export const orderSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        productId: z.string().trim().min(1),
+        quantity: z.number().int().positive(),
+      }),
+    )
+    .min(1),
+});
