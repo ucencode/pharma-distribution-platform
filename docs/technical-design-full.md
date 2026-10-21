@@ -460,7 +460,7 @@ pharma-distribution-platform/
 ├─ docker-compose.yml               # local Postgres
 ├─ vitest.config.mts
 ├─ drizzle.config.ts
-└─ .env.example                     # DATABASE_URL
+└─ .env.example                     # DATABASE_URL, APP_ENV
 ```
 
 `TASK.md` (the brief) is git-ignored and is not committed. The README is submitted as an email attachment and is not committed.
@@ -493,7 +493,8 @@ pharma-distribution-platform/
 |---|---|
 | Database | Neon project in the nearest region (e.g., `aws-ap-southeast-1`, Singapore), using the pooled connection string. |
 | Migration and seed | `pnpm db:migrate && pnpm db:seed`, run against the Neon URL. |
-| Application | GitHub repository imported into Vercel, with `DATABASE_URL` set. Function region: Singapore (`sin1`), co-located with the database. |
+| Application | GitHub repository imported into Vercel, with `DATABASE_URL` set to the pooled connection string and `APP_ENV=production`. Function region: Singapore (`sin1`), co-located with the database. |
+| Environments | `APP_ENV` is `development` (local, set in `.env`) or `production` (Vercel). In production, prepared statements are turned off, because Neon's pooled connection does not support them. |
 | CI | GitHub Actions runs `pnpm lint && pnpm typecheck && pnpm test` on every push. Vercel deploys `main`. |
 | Cold starts | Vercel Hobby does not sleep. Neon free compute suspends after about 5 minutes idle; the first request after suspension takes about 0.5–1 s. The README documents this. |
 | Availability | Neither service pauses or deletes a free project within one month. The deployed URL is checked weekly during the review period. |

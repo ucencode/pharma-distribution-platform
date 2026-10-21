@@ -30,7 +30,7 @@ Next.js 16 (App Router, TypeScript), Tailwind CSS 4, PostgreSQL 17 in Docker for
 
 ```sh
 docker compose up -d     # start local PostgreSQL on port 5432
-cp .env.example .env     # DATABASE_URL for local development
+cp .env.example .env     # DATABASE_URL and APP_ENV=development for local development
 npm run db:migrate       # apply migrations
 npm run db:seed          # insert or update the sample data (safe to run repeatedly)
 npm run dev              # start the app on http://localhost:3000
