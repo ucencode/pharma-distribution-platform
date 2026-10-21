@@ -1,9 +1,17 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closeDb, db } from "@/lib/db/client";
-import { inventory } from "@/lib/db/schema";
+import { inventory, products } from "@/lib/db/schema";
 import { POST } from "@/app/api/orders/evaluate/route";
 
-// The tests read the seed data and do not change it.
+// The tests use the seed data and do not change it. Two test products are added for the
+// cases the seed data does not cover, and deleted with their stock afterwards:
+// - noStock: no stock in any warehouse.
+// - coldChain: a cold-chain product held only by W01 (no cold storage, no refrigerated
+//   fleet) and W02 (cold storage, no refrigerated fleet).
+const ids = { noStock: "", coldChain: "" };
+const seedWarehouses = ["W01", "W02", "W03", "W04", "W05", "W06", "W07", "W08"];
+
 const json = (body: unknown) =>
   new Request("http://test", {
     method: "POST",
@@ -11,7 +19,34 @@ const json = (body: unknown) =>
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 
-afterAll(closeDb);
+type Body = { items: { productId: string; quantity: number }[] };
+const evaluate = async (body: Body) => {
+  const res = await POST(json(body));
+  expect(res.status).toBe(200);
+  return res.json();
+};
+
+beforeAll(async () => {
+  const [noStock, coldChain] = await db
+    .insert(products)
+    .values([
+      { name: "Test No Stock", categoryId: "C01", requiresColdChain: false },
+      { name: "Test Cold Chain", categoryId: "C02", requiresColdChain: true },
+    ])
+    .returning();
+  ids.noStock = noStock.id;
+  ids.coldChain = coldChain.id;
+  await db.insert(inventory).values([
+    { warehouseId: "W01", productId: ids.coldChain, quantity: 5 },
+    { warehouseId: "W02", productId: ids.coldChain, quantity: 15 },
+  ]);
+});
+
+afterAll(async () => {
+  await db.delete(inventory).where(eq(inventory.productId, ids.coldChain));
+  await db.delete(products).where(inArray(products.id, [ids.noStock, ids.coldChain]));
+  await closeDb();
+});
 
 describe("POST /api/orders/evaluate", () => {
   it("splits gloves and Hepatitis B vaccine across W01 and W04", async () => {
@@ -59,5 +94,114 @@ describe("POST /api/orders/evaluate", () => {
     expect((await POST(json({ items: [{ productId: "P001", quantity: 0 }] }))).status).toBe(400);
     expect((await POST(json({ items: [{ productId: "P001", quantity: 1.5 }] }))).status).toBe(400);
     expect((await POST(json("not json"))).status).toBe(400);
+  });
+
+  describe("orders that cannot be fulfilled in full", () => {
+    it("returns UNFULFILLABLE for a product without stock", async () => {
+      const decision = await evaluate({ items: [{ productId: ids.noStock, quantity: 5 }] });
+      expect(decision.status).toBe("UNFULFILLABLE");
+      expect(decision.shipments).toEqual([]);
+      expect(decision.unfulfilled).toEqual([
+        { productId: ids.noStock, requested: 5, available: 0 },
+      ]);
+      expect(decision.metrics).toEqual({ shipmentCount: 0, totalDistanceKm: 0 });
+      for (const warehouseId of seedWarehouses) {
+        expect(decision.excluded).toContainEqual({
+          warehouseId,
+          productId: ids.noStock,
+          reason: "NO_STOCK",
+        });
+      }
+      expect(decision.explanation).toEqual([
+        "No eligible warehouse has stock of the ordered products, so nothing can be shipped.",
+        "Test No Stock: 0 of 5 can be shipped, 5 short.",
+      ]);
+    });
+
+    it("returns PARTIAL and ships what is in stock when one product has no stock", async () => {
+      const decision = await evaluate({
+        items: [
+          { productId: "P001", quantity: 10 },
+          { productId: ids.noStock, quantity: 5 },
+        ],
+      });
+      expect(decision.status).toBe("PARTIAL");
+      expect(decision.shipments).toEqual([
+        { warehouseId: "W01", distanceKm: 5, items: [{ productId: "P001", quantity: 10 }] },
+      ]);
+      expect(decision.unfulfilled).toEqual([
+        { productId: ids.noStock, requested: 5, available: 0 },
+      ]);
+    });
+
+    it("returns PARTIAL when the total stock is lower than the quantity", async () => {
+      const decision = await evaluate({ items: [{ productId: "P002", quantity: 120 }] });
+      expect(decision.status).toBe("PARTIAL");
+      expect(decision.shipments).toEqual([
+        { warehouseId: "W04", distanceKm: 30, items: [{ productId: "P002", quantity: 40 }] },
+        { warehouseId: "W07", distanceKm: 45, items: [{ productId: "P002", quantity: 8 }] },
+        { warehouseId: "W08", distanceKm: 150, items: [{ productId: "P002", quantity: 60 }] },
+      ]);
+      expect(decision.unfulfilled).toEqual([{ productId: "P002", requested: 120, available: 108 }]);
+      expect(decision.metrics).toEqual({ shipmentCount: 3, totalDistanceKm: 225 });
+      expect(decision.explanation).toContain(
+        "Vaccine — Hepatitis B (10-dose vial): 108 of 120 can be shipped, 12 short. W02 and W06 hold 50 more but cannot deliver cold-chain products.",
+      );
+    });
+  });
+
+  describe("cold chain", () => {
+    it("ships a vaccine from W04 and skips the nearer W02, which has no refrigerated fleet", async () => {
+      const decision = await evaluate({ items: [{ productId: "P004", quantity: 10 }] });
+      expect(decision.status).toBe("FULL");
+      expect(decision.shipments).toEqual([
+        { warehouseId: "W04", distanceKm: 30, items: [{ productId: "P004", quantity: 10 }] },
+      ]);
+      expect(decision.excluded).toContainEqual({
+        warehouseId: "W02",
+        productId: "P004",
+        reason: "NO_COLD_CHAIN",
+      });
+      expect(decision.excluded).toContainEqual({
+        warehouseId: "W06",
+        productId: "P004",
+        reason: "NO_COLD_CHAIN",
+      });
+      expect(decision.explanation).toContain(
+        "W02 (12 km) holds Vaccine — Tetanus Toxoid (10-dose vial) but has no refrigerated fleet, so it cannot deliver cold-chain products.",
+      );
+    });
+
+    it("ships a product without cold chain from a warehouse without cold storage", async () => {
+      const decision = await evaluate({ items: [{ productId: "P001", quantity: 10 }] });
+      expect(decision.shipments).toEqual([
+        { warehouseId: "W01", distanceKm: 5, items: [{ productId: "P001", quantity: 10 }] },
+      ]);
+    });
+
+    it("returns UNFULFILLABLE when only warehouses without cold chain hold the product", async () => {
+      const decision = await evaluate({ items: [{ productId: ids.coldChain, quantity: 10 }] });
+      expect(decision.status).toBe("UNFULFILLABLE");
+      expect(decision.shipments).toEqual([]);
+      expect(decision.unfulfilled).toEqual([
+        { productId: ids.coldChain, requested: 10, available: 0 },
+      ]);
+      expect(decision.excluded).toContainEqual({
+        warehouseId: "W01",
+        productId: ids.coldChain,
+        reason: "NO_COLD_CHAIN",
+      });
+      expect(decision.excluded).toContainEqual({
+        warehouseId: "W02",
+        productId: ids.coldChain,
+        reason: "NO_COLD_CHAIN",
+      });
+      expect(decision.explanation).toEqual([
+        "No eligible warehouse has stock of the ordered products, so nothing can be shipped.",
+        "W01 (5 km) holds Test Cold Chain but has no cold storage and no refrigerated fleet, so it cannot deliver cold-chain products.",
+        "W02 (12 km) holds Test Cold Chain but has no refrigerated fleet, so it cannot deliver cold-chain products.",
+        "Test Cold Chain: 0 of 10 can be shipped, 10 short. W01 and W02 hold 20 more but cannot deliver cold-chain products.",
+      ]);
+    });
   });
 });
