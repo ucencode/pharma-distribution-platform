@@ -1,12 +1,13 @@
 "use client";
 
-import { Menu, Pill, Tags, Warehouse } from "lucide-react";
+import { ClipboardList, Menu, Pill, Tags, Warehouse } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { button } from "./styles";
 
 const links = [
+  { href: "/", label: "Order", icon: ClipboardList },
   { href: "/categories", label: "Categories", icon: Tags },
   { href: "/products", label: "Products", icon: Pill },
   { href: "/warehouses", label: "Warehouses", icon: Warehouse },
@@ -30,7 +31,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <Menu className="size-4" aria-hidden="true" />
           Menu
         </button>
-        <Link href="/products" className="font-semibold text-zinc-900 dark:text-zinc-100">
+        <Link href="/" className="font-semibold text-zinc-900 dark:text-zinc-100">
           Pharma Distribution
         </Link>
       </header>

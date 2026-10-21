@@ -357,7 +357,7 @@ Error responses:
 
 ### Layout
 
-The app uses an admin layout: a top bar across the full width, a sidebar with links to Products, Warehouses and Categories, and a work area that fills the rest of the screen. Below the `md` breakpoint the sidebar is hidden and opens from a Menu button in the top bar. `/` redirects to `/products` until the order page exists.
+The app uses an admin layout: a top bar across the full width, a sidebar with links to Order, Categories, Products and Warehouses, and a work area that fills the rest of the screen. Below the `md` breakpoint the sidebar is hidden and opens from a Menu button in the top bar.
 
 ### Data management pages
 
@@ -381,8 +381,8 @@ All three pages follow the same pattern:
 
 The order page is the home page (`/`).
 
-1. **Order form.** Repeatable rows with a product dropdown and quantity field, with "Add line" and "Remove" controls.
-2. **Result card.**
+1. **Order form** (`app/components/OrderForm.tsx`). Repeatable rows with a product dropdown and quantity field, with "Add line" and "Remove" controls. The last line cannot be removed. Evaluate sends the lines to `POST /api/orders/evaluate`; an API error is shown above the form.
+2. **Result card** (`app/components/ResultCard.tsx`). Shown below the form after an evaluation. Warehouse cities and product names come from the data endpoints.
    - Status badge: Fully fulfilled / Partially fulfilled / Cannot fulfil.
    - One card per shipment: warehouse, city, distance, items, and a ❄️ marker on cold-chain lines.
    - Shortfall table (if any).

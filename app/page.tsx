@@ -1,6 +1,8 @@
-import { redirect } from "next/navigation";
+import type { Metadata } from "next";
+import OrderForm from "./components/OrderForm";
 
-// The order page will live here; until then the app opens on the products page.
-export default function Home() {
-  redirect("/products");
+export const metadata: Metadata = { title: "Order" };
+
+export default function OrderPage() {
+  return <OrderForm />;
 }
