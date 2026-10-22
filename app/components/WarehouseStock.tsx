@@ -4,7 +4,13 @@ import { Check, Plus, Trash2 } from "lucide-react";
 import type { inventory, products, warehouses } from "@/lib/db/schema";
 import { api } from "./api";
 import Field from "./Field";
-import { button, dangerOutline, input, muted, primary, table, tableWrap, td, th, tr } from "./styles";
+import { button, dangerOutline, input, muted, primary, tableWrap, th, tr } from "./styles";
+
+// Below md, each stock line is stacked: the product on top, the quantity form and Remove
+// below it. From md up, the lines form a table. Long product names wrap instead of scrolling.
+const stockTable = "w-full border-collapse text-sm text-zinc-900 dark:text-zinc-100";
+const row = `${tr} flex flex-wrap items-center gap-2 border-b border-zinc-100 px-4 py-3 md:table-row md:p-0 dark:border-zinc-800`;
+const cell = "block md:table-cell md:border-b md:border-zinc-100 md:px-4 md:py-2.5 md:dark:border-zinc-800";
 
 type Warehouse = typeof warehouses.$inferSelect;
 type Product = typeof products.$inferSelect;
@@ -49,8 +55,8 @@ export default function WarehouseStock({ warehouse, products, stock, run }: Prop
         <p className={muted}>This warehouse has no stock yet. Add a product below.</p>
       ) : (
         <div className={tableWrap}>
-          <table className={table}>
-            <thead>
+          <table className={stockTable}>
+            <thead className="hidden md:table-header-group">
               <tr>
                 <th className={th}>Product</th>
                 <th className={th}>Quantity</th>
@@ -59,16 +65,16 @@ export default function WarehouseStock({ warehouse, products, stock, run }: Prop
                 </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="block md:table-row-group">
               {lines.map((line) => (
-                <tr key={line.productId} className={tr}>
-                  <td className={td}>
+                <tr key={line.productId} className={row}>
+                  <td className={`${cell} w-full md:w-auto`}>
                     {productName(line.productId)}{" "}
                     <span className="font-mono text-xs text-zinc-600 dark:text-zinc-400">
                       {line.productId}
                     </span>
                   </td>
-                  <td className={td}>
+                  <td className={`${cell} min-w-0 flex-1`}>
                     <form
                       // Remount after a reload so the input shows the stored quantity.
                       key={line.quantity}
@@ -90,7 +96,7 @@ export default function WarehouseStock({ warehouse, products, stock, run }: Prop
                         required
                         defaultValue={line.quantity}
                         aria-label={`Quantity of ${productName(line.productId)}`}
-                        className={`${input} w-28 text-right`}
+                        className={`${input} min-w-0 flex-1 text-right md:w-28 md:flex-none`}
                       />
                       <button type="submit" className={button}>
                         <Check className="size-4" aria-hidden="true" />
@@ -98,7 +104,7 @@ export default function WarehouseStock({ warehouse, products, stock, run }: Prop
                       </button>
                     </form>
                   </td>
-                  <td className={`${td} text-right`}>
+                  <td className={`${cell} md:text-right`}>
                     <button
                       type="button"
                       className={dangerOutline}

@@ -5,14 +5,17 @@ import { useEffect, useRef } from "react";
 import { button } from "./styles";
 
 // Native modal dialog: the browser provides the backdrop, focus trapping and Escape to close.
+// `wide` gives more room from the md breakpoint up, for content such as tables.
 export default function Dialog({
   open,
   title,
+  wide = false,
   onClose,
   children,
 }: {
   open: boolean;
   title: string;
+  wide?: boolean;
   onClose: () => void;
   children: React.ReactNode;
 }) {
@@ -29,7 +32,7 @@ export default function Dialog({
     <dialog
       ref={ref}
       onClose={onClose}
-      className="m-auto w-[calc(100%-2rem)] max-w-xl rounded-lg border border-zinc-200 bg-white text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+      className={`m-auto w-[calc(100%-2rem)] max-w-xl ${wide ? "md:max-w-3xl lg:max-w-4xl" : ""} rounded-lg border border-zinc-200 bg-white text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100`}
     >
       <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-5 py-3 dark:border-zinc-800">
         <h2 className="text-base font-semibold">{title}</h2>

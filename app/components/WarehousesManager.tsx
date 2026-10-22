@@ -240,6 +240,7 @@ export default function WarehousesManager() {
       <Dialog
         open={selected !== undefined}
         title={selected ? `Stock in ${selected.id} ${selected.city}` : "Stock"}
+        wide
         onClose={() => setStockFor(null)}
       >
         {selected && (
