@@ -157,14 +157,14 @@ export default function WarehousesManager() {
                   <td className={td}>
                     <div className="flex gap-2">
                       {row.hasColdStorage && (
-                        <Badge variant="blue" title="Cold storage: can store cold chain products">
+                        <Badge variant="blue" title="Can store cold-chain products">
                           <Package className="size-3.5" aria-hidden="true" />
                           <Snowflake className="size-3.5" aria-hidden="true" />
                           Cold Storage
                         </Badge>
                       )}
                       {row.hasRefrigeratedFleet && (
-                        <Badge variant="lightBlue" title="Refrigerated fleet: can deliver cold chain products">
+                        <Badge variant="lightBlue" title="Can deliver cold-chain products">
                           <Truck className="size-3.5" aria-hidden="true" />
                           <Snowflake className="size-3.5" aria-hidden="true" />
                           Refrigerated Fleet

@@ -148,7 +148,7 @@ export default function ProductsManager() {
                   <td className={td}>{categoryName(row.categoryId)}</td>
                   <td className={td}>
                     {row.requiresColdChain && (
-                      <Badge variant="lightBlue" title="Cold chain required: store and ship refrigerated">
+                      <Badge variant="lightBlue" title="Store and ship refrigerated">
                         <Snowflake className="size-3.5" aria-hidden="true" />
                         <span className="font-bold" aria-hidden="true">
                           !
