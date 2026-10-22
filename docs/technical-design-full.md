@@ -4,91 +4,91 @@
 |---|---|
 | **Status** | Draft v0.1 |
 | **Date** | 2026-10-17 |
-| **Stack** | Next.js (App Router, TypeScript) · PostgreSQL · Drizzle ORM · Vercel + Neon |
-| **Scope** | Warehouse selection + simple UI |
+| **Stack** | Next.js (App Router, TypeScript), PostgreSQL, Drizzle ORM, Vercel, Neon |
+| **Scope** | Warehouse selection and a simple UI |
 
 ---
 
 ## 1. Summary
 
-Hospitals, clinics and pharmacies order one or more products. The service chooses the warehouse or warehouses for each order. It returns the decision and the reasons. The choice uses stock, product handling needs and distance to the customer.
+The service selects one or more warehouses to fulfill an order from a hospital, clinic, or pharmacy. It considers product availability, handling requirements, and distance to the customer, then returns the selected warehouses with an explanation of the decision.
 
-The system is one Next.js application with a PostgreSQL database. It serves the web pages and the API.
+The application uses Next.js for both the web UI and API, with PostgreSQL for data storage.
 
 ---
 
 ## 2. Requirements
 
-### 2.1 Functional
+### 2.1 Functional requirements
 
 | ID | Requirement | Priority |
 |---|---|---|
-| F1 | Accept an order: a list of `{productId, quantity}` lines | Must |
-| F2 | Select warehouse(s) based on stock availability and delivery distance | Must |
-| F3 | Return the decision with an explanation | Must |
-| F4 | Handle orders that no single warehouse can cover (split shipments) | Must |
-| F5 | Handle orders that no combination can fully cover (partial result and shortfall) | Must |
-| F6 | Provide a UI with an order input form and result display | Must |
-| F7 | Enforce product handling requirements (cold chain for vaccines) | Must |
-| F8 | Log every evaluation for audit (not built) | Could |
-| F9 | Warn when a shipment leaves at a time at which its warehouse's past deliveries were slow | Could |
+| F1 | Accept an order containing one or more `{productId, quantity}` lines. | Must |
+| F2 | Select warehouses based on stock availability and delivery distance. | Must |
+| F3 | Return the selection with an explanation. | Must |
+| F4 | Split orders across multiple warehouses when no single warehouse can fulfill the entire order. | Must |
+| F5 | Return the best partial result and report the shortfall when available stock cannot cover the entire order. | Must |
+| F6 | Provide a UI with an order form and a display of the selection results. | Must |
+| F7 | Enforce product handling requirements, including cold-chain requirements for vaccines. | Must |
+| F8 | Log each evaluation for auditing. Not implemented. | Could |
+| F9 | Warn when historical delivery records indicate that deliveries from a selected warehouse tend to be slower at the planned departure time. | Could |
 
-### 2.2 Non-functional
+### 2.2 Non-functional requirements
 
-- **Availability.** The site stays online for at least one month. The hosting plan does not pause it (§13).
-- **Determinism.** The same input and data give the same output and explanation.
-- **Authentication.** None.
-- **Operations.** One repository, one deployment, one managed PostgreSQL database.
-- **Testability.** The decision logic does not depend on Next.js or the database.
+- **Availability:** Keep the deployed application accessible for at least one month after submission. The hosting plan must not require periodic reactivation (§13).
+- **Determinism:** Given the same input and data, the service must return the same selection and explanation.
+- **Authentication:** No authentication is required.
+- **Operations:** Use one repository, one deployment, and one managed PostgreSQL database.
+- **Testability:** Keep the selection logic independent of Next.js and the database so it can be tested separately.
 
 ### 2.3 Out of scope
 
-Stock reservation, many customer locations, user accounts, routing APIs, batches and expiry dates.
+Stock reservation, multiple customer locations, user accounts, routing APIs, inventory batches, and expiry dates.
 
 ---
 
 ## 3. Domain analysis and assumptions
 
-### 3.1 Cold chain
+### 3.1 Cold-chain requirements
 
-P002 (Hepatitis B vaccine) and P004 (Tetanus Toxoid vaccine) need cold from storage to delivery.
+Products P002 (Hepatitis B vaccine) and P004 (Tetanus Toxoid vaccine) require cold-chain handling during storage and delivery.
 
-| Warehouse | km | Cold storage | Refrigerated fleet | **Can ship cold chain** |
-|---|---|---|---|---|
-| W01 Surabaya | 5 | – | – | – |
-| W02 Surabaya | 12 | ✅ | – | **No** |
-| W03 Sidoarjo | 25 | – | – | – |
-| W04 Gresik | 30 | ✅ | ✅ | **Yes** |
-| W05 Malang | 90 | – | – | – |
-| W06 Malang | 95 | ✅ | – | **No** |
-| W07 Pasuruan | 45 | ✅ | ✅ | **Yes** |
-| W08 Jember | 150 | ✅ | ✅ | **Yes** |
+| Warehouse | Distance | Cold storage | Refrigerated fleet | Can deliver cold-chain products |
+|---|---:|---|---|---|
+| W01 — Surabaya | 5 km | No | No | No |
+| W02 — Surabaya | 12 km | Yes | No | No |
+| W03 — Sidoarjo | 25 km | No | No | No |
+| W04 — Gresik | 30 km | Yes | Yes | Yes |
+| W05 — Malang | 90 km | No | No | No |
+| W06 — Malang | 95 km | Yes | No | No |
+| W07 — Pasuruan | 45 km | Yes | Yes | Yes |
+| W08 — Jember | 150 km | Yes | Yes | Yes |
 
-Rules:
+The selection logic follows these rules:
 
-- A warehouse can ship cold-chain products when it has cold storage and a refrigerated fleet. The function `canShip(product, warehouse)` checks this.
-- W02 and W06 have cold storage but no refrigerated fleet. They cannot deliver vaccines themselves. The explanation says this.
-- A refrigerated van can collect vaccines at W02 and W06 when other stock is not enough (§7.2 step 6).
-- A warehouse without cold storage never supplies vaccines.
-- Cold chain is a product field (`requires_cold_chain`), not a category rule. Paracetamol is in "Pharmaceutical", but it does not need cold.
+- A warehouse can deliver cold-chain products only if it has both cold storage and a refrigerated fleet. The `canShip(product, warehouse)` function enforces this requirement.
+- W02 and W06 have cold storage but no refrigerated fleet, so they cannot deliver vaccines directly. The selection explanation must make this limitation clear.
+- If the selected warehouses cannot supply enough vaccines, a refrigerated van can collect additional stock from W02 or W06 (§7.2, step 6).
+- Warehouses without cold storage cannot supply vaccines, including through the refrigerated-van fallback.
+- Cold-chain handling is determined by the `requires_cold_chain` product field, not by product category. For example, Paracetamol is classified as a pharmaceutical but does not require cold-chain handling.
 
 ### 3.2 Other assumptions
 
-| # | Assumption |
+| ID | Assumption |
 |---|---|
-| A1 | There is one customer location. Each warehouse has one distance, `distance_to_customer_km`. |
-| A2 | An evaluation is a quote. It does not reduce stock. §10 describes reservation. |
-| A3 | Quantities are positive whole numbers (boxes or vials). Lines for the same product are added together. |
-| A4 | A shipment is one trip from one warehouse to the customer. Products from one warehouse travel together. Truck size is not checked. |
-| A5 | An order is split only when no single warehouse or city group (§7.2) has all of it. |
-| A6 | An order with too little stock is not rejected. The response contains the best partial result and the missing quantity. |
-| A7 | The day and time of a past delivery are the departure from the warehouse. The records have no date. |
-| A8 | Delivery time warnings check the warehouse that drives to the customer. Transfers inside a city have no records. |
-| A9 | Past deliveries only add warnings. They do not change the choice (§7.6). |
-| A10 | The current time is Jakarta time (WIB, UTC+7), the customer's time zone. The viewer's time zone is not used. |
-| A11 | A van pickup is a fallback. It runs only when a vaccine is still missing after the split. The van comes from the nearest warehouse with a refrigerated fleet. The pickup is a separate trip. |
-| A12 | The distance between two warehouses is not known. A pickup trip counts its upper limit: van km + pickup km (empty, through the customer) + pickup km (loaded). |
-| A13 | A distance with an unknown part is marked approximate. This covers hub shipments with a transfer (the transfer is not counted) and van pickups (upper limit). |
+| A1 | There is a single customer location. Each warehouse has a fixed distance_to_customer_km value. |
+| A2 | An evaluation produces a fulfillment proposal without reserving or decrementing stock. Stock reservation is discussed in §10. |
+| A3 | Quantities are positive integers representing boxes or vials. Multiple lines for the same product are combined before evaluation. |
+| A4 | Each shipment represents one trip from a warehouse to the customer. Products supplied by the same warehouse travel together. Truck capacity is not checked. |
+| A5 | The system splits an order only when neither a single warehouse nor a city group (§7.2) can fulfill it in full. |
+| A6 | Insufficient stock does not cause the entire order to be rejected. The response includes the best partial result and the remaining quantity for each unfulfilled product. |
+| A7 | The day and time in each historical delivery record represent the departure time from the warehouse. The records do not include calendar dates. |
+| A8 | Delivery-time warnings use the warehouse responsible for the trip to the customer. No historical data is available for transfers between warehouses within a city. |
+| A9 | Historical delivery records affect warnings only. They do not influence warehouse selection (§7.6). |
+| A10 | The service uses Jakarta time (WIB, UTC+7) as the reference time zone. It does not use the viewer's local time zone. |
+| A11 | Refrigerated-van pickup is a fallback used only when vaccines remain unfulfilled after the initial split. The van is dispatched from the nearest warehouse with a refrigerated fleet, and the pickup counts as a separate trip. |
+| A12 | Distances between warehouses are unavailable. For a refrigerated-van pickup, the system estimates the total distance as the van's distance to the customer, plus the pickup warehouse's distance to the customer twice: once for the empty trip from the customer to the pickup warehouse, and once for the return trip with the vaccines. For example, a van dispatched from W04 to collect vaccines from W02 travels an estimated 30 + 12 + 12 = 54 km. |
+| A13 | The system marks a distance as approximate when part of the route is unknown. This applies to hub shipments, where the transfer distance is excluded, and refrigerated-van pickups, where an upper-bound estimate is used. |
 
 ---
 
@@ -96,16 +96,16 @@ Rules:
 
 | Concern | Choice | Rationale | Alternatives considered |
 |---|---|---|---|
-| App framework | **Next.js (App Router) + TypeScript** | One codebase and one deployment for UI and API. Route Handlers give a JSON API. | Express + React SPA: two deployments. NestJS: more structure than needed. |
-| Database | **PostgreSQL** | The data is relational. Constraints (`CHECK quantity >= 0`, foreign keys) protect it. Transactions and row locks support stock reservation later. | SQLite: serverless hosts lose local files. MongoDB: no gain for relational data. |
-| ORM / queries | **Drizzle ORM + drizzle-kit** | Typed schemas, SQL-like queries, migrations, fast cold starts. | Prisma: bigger client, slower cold starts. Raw SQL: no types. |
-| DB driver | `postgres` (postgres.js) with Neon's **pooled** connection string | One driver for local Docker PostgreSQL and Neon. | `@neondatabase/serverless`: needs a different local setup. |
-| Validation | **Zod** | One schema checks each request and gives its TypeScript type. | – |
-| Styling | **Tailwind CSS**, lucide-react icons | Utility classes. Shared UI parts live in `app/components/`. | – |
-| Tests | **Vitest** | Runs TypeScript directly. Engine tests need no database. | Jest |
-| Hosting | **Vercel (Hobby)** + **Neon Postgres (Free)** | Neither free plan pauses the project. Neon sleeps when idle and wakes in under a second. | Supabase free: pauses after about 7 idle days. Render free: the web service sleeps (30–60 s start), and the free database expires. |
+| Application framework | **Next.js (App Router) + TypeScript** | One application and deployment for both the UI and API. Route Handlers expose the JSON API. | Express + React SPA: requires separate frontend and backend deployments. NestJS: more framework structure than this project needs. |
+| Database | **PostgreSQL** | Relational data fits the domain. `CHECK` constraints and foreign keys enforce data integrity. Transactions and row locks can support stock reservation later. | SQLite: local database files are a poor fit for many serverless deployment environments. MongoDB: offers little benefit for this relational data model. |
+| ORM and migrations | **Drizzle ORM + drizzle-kit** | Provides typed schemas, SQL-like queries, and schema migrations. | Prisma: a different ORM abstraction and query API. Raw SQL: requires more manual type mapping and query management. |
+| Database driver | `postgres` (postgres.js) with Neon's **pooled connection string** | The same driver works with both local PostgreSQL in Docker and the hosted Neon database. | `@neondatabase/serverless`: a different connection model, adding another consideration when setting up the local environment. |
+| Request validation | **Zod** | A schema validates incoming requests and provides the corresponding TypeScript type. | — |
+| Styling and icons | **Tailwind CSS** + `lucide-react` | Tailwind handles styling through utility classes. Shared UI components live in `app/components/`. | — |
+| Testing | **Vitest** | Fits the TypeScript stack. The selection engine can be tested without a database. | Jest |
+| Hosting | **Vercel (Hobby) + Neon Postgres (Free)** | Keeps hosting costs at zero for the intended evaluation workload. Vercel deployments do not spin down simply because they are idle. Neon scales compute to zero when idle and resumes it on demand, so the first query after inactivity may incur a delay. Free-tier usage limits still apply. | Supabase Free: projects with low activity can be paused after seven days. Render Free: web services spin down after 15 minutes of inactivity, and free PostgreSQL databases expire after 30 days. |
 
-> Versions are the latest stable versions at setup time (`create-next-app@latest`). `package.json` records them.
+The dependencies were installed using the latest stable versions available during setup. The exact versions are recorded in `package.json`.
 
 ---
 
@@ -114,20 +114,27 @@ Rules:
 ```mermaid
 flowchart LR
     P["app/page.tsx<br/>Server Component"] --> F["OrderForm<br/>Client Component"]
-    F -- "GET /api/products,<br/>/api/warehouses" --> D["Data route handlers"]
-    F -- "POST /api/orders/evaluate" --> R["Evaluate route handler<br/>1. validate request (Zod)<br/>2. load snapshot<br/>3. call engine<br/>4. return JSON"]
+
+    F -- "GET /api/products<br/>GET /api/warehouses" --> D["Data Route Handlers"]
+
+    F -- "POST /api/orders/evaluate" --> R["Evaluation Route Handler<br/>1. Validate request with Zod<br/>2. Load snapshot<br/>3. Run selection engine<br/>4. Return JSON"]
+
     R --> Q["lib/db/queries.ts<br/>loadSnapshot()"]
-    R --> E["lib/engine<br/>no Next.js, no database"]
+    R --> E["lib/engine<br/>Independent of Next.js and database"]
+
     Q --> DB[("PostgreSQL (Neon)")]
     D --> DB
 ```
 
-`lib/engine` takes a `Snapshot` (products, warehouses, stock, past deliveries) and an `Order`. It returns a `Decision`. It imports nothing from Next.js or Drizzle.
+The selection engine in `lib/engine` takes a `Snapshot` containing products, warehouses, stock, and historical delivery records, along with an `Order`. It returns a `Decision`.
 
-Route handlers:
+The engine does not import Next.js or Drizzle ORM. It receives its inputs as data, so its selection logic can be tested independently of the application framework and database.
 
-- Route handlers set no `dynamic` or `runtime` option. Cache Components is on and does not allow them. Handlers run on Node.js. `POST` handlers are never cached.
-- Each request loads the full snapshot with one query per table. There is no cache.
+### Route handlers
+
+- **Runtime and configuration:** The application enables Cache Components. Route-segment configuration options such as `dynamic` and `runtime` are disabled in this mode. Route handlers therefore use the default Node.js runtime without an explicit `runtime` setting.
+- **Caching:** `POST` handlers are not cached. The application does not cache the data used for warehouse selection.
+- **Snapshot loading:** Each evaluation request loads the full snapshot using one query per table. The engine uses the latest data returned by these queries. No application-level cache is used.
 
 ---
 
@@ -303,25 +310,25 @@ The trip counts as about 30 + 12 + 12 = 54 km.
 
 ### 7.3 Explanation generation
 
-The explanation comes from fixed templates. The same decision always gives the same text. The lines come in this order:
+The explanation comes from fixed templates. The same decision always gives the same text. A line names the city at the first mention of each warehouse, for example "W01 (Surabaya)". The lines come in this order:
 
 | # | Part | Example |
 |---|---|---|
 | 1 | Outcome, one line | See the table below. |
-| 2 | Cold-chain exclusion, one line per warehouse. Only for products that the van does not collect there. `NO_STOCK` is not explained. | "W06 (95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products." |
-| 3 | Van pickup, one line per pickup | "W02 (12 km) has no refrigerated fleet, and the other warehouses do not have enough stock. A refrigerated van from W04 (30 km) collects 12 Vaccine — Hepatitis B (10-dose vial) at W02 and delivers them. The trip is about 54 km: at most 30 + 12 km to reach W02, because the distance between W04 and W02 is not known, then 12 km to the customer." |
-| 4 | Transit, one line per transfer | "W02 sends 20 Surgical Gloves (Box of 100) to W01, which delivers them with the rest of its shipment. The distance between W02 and W01 is not known and is not counted." |
-| 5 | Allocation, one line per product | "Surgical Gloves (Box of 100): 200 from W01 (5 km) and 20 from W02 through W01 (5 km)." / "Vaccine — Hepatitis B (10-dose vial): 40 from W04 (30 km), 8 from W07 (45 km), 60 from W08 (150 km) and 12 from W02 by van from W04 (about 54 km)." |
-| 6 | Shortfall, one line per short product. A second sentence names cold-chain-excluded warehouses that still have stock after van pickups. | "Vaccine — Hepatitis B (10-dose vial): 158 of 200 available, 42 missing." / "… W01 has 5 more in stock but cannot deliver cold-chain products." |
+| 2 | Cold-chain exclusion, one line per warehouse. Only for products that the van does not collect there. `NO_STOCK` is not explained. | "W06 (Malang, 95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products." |
+| 3 | Van pickup, one line per pickup | "W02 (Surabaya, 12 km) has no refrigerated fleet, and the other warehouses do not have enough stock. A refrigerated van from W04 (Gresik, 30 km) collects 12 Vaccine — Hepatitis B (10-dose vial) at W02 and delivers them. The trip is about 54 km: at most 30 + 12 km to reach W02, because the distance between W04 and W02 is not known, then 12 km to the customer." |
+| 4 | Transit, one line per transfer | "W02 (Surabaya) sends 20 Surgical Gloves (Box of 100) to W01 (Surabaya), which delivers them with the rest of its shipment. The distance between W02 and W01 is not known and is not counted." |
+| 5 | Allocation, one line per product | "Surgical Gloves (Box of 100): 200 from W01 (Surabaya, 5 km) and 20 from W02 (Surabaya) through W01 (Surabaya, 5 km)." / "Vaccine — Hepatitis B (10-dose vial): 40 from W04 (Gresik, 30 km), 8 from W07 (Pasuruan, 45 km), 60 from W08 (Jember, 150 km) and 12 from W02 (Surabaya, about 54 km) by van from W04 (Gresik)." |
+| 6 | Shortfall, one line per short product. A second sentence names cold-chain-excluded warehouses that still have stock after van pickups. | "Vaccine — Hepatitis B (10-dose vial): 158 of 200 available, 42 missing." / "… W01 (Surabaya) has 5 more in stock but cannot deliver cold-chain products." |
 
 Outcome lines:
 
 | Case | Line |
 |---|---|
-| Single warehouse | "Shipped in full from W01 (5 km), the nearest warehouse with the whole order in stock." |
-| Single group with transfers | "Shipped in one delivery from W01 (5 km). The Surabaya warehouses together have the whole order, so they combine their stock at W01." |
+| Single warehouse | "Shipped in full from W01 (Surabaya, 5 km), the nearest warehouse with the whole order in stock." |
+| Single group with transfers | "Shipped in one delivery from W01 (Surabaya, 5 km). The Surabaya warehouses together have the whole order, so they combine their stock at W01." |
 | Split | "Split into 2 shipments, because no warehouse can deliver the whole order. Each product comes from the nearest warehouse that has it." |
-| Split with one shipment | "Shipped from W04 (30 km). No warehouse can deliver the whole order." |
+| Split with one shipment | "Shipped from W04 (Gresik, 30 km). No warehouse can deliver the whole order." |
 | Nothing shipped | "Nothing can be shipped: no warehouse that can deliver these products has them in stock." |
 
 ### 7.4 Worked examples (sample data)
@@ -376,7 +383,7 @@ The engine checks two fixed windows. A window includes its start time and exclud
 | Rush hour | Mon–Fri | 07:00–09:00 and 16:00–19:00 |
 | Weekend | Fri, Sat, Sun | all day |
 
-`slowWarnings(shipments, deliveries, departure)` in `lib/engine/delivery.ts` runs when the order has a departure. It checks each shipment in order, and each window that contains the departure:
+`slowWarnings(shipments, warehouses, deliveries, departure)` in `lib/engine/delivery.ts` runs when the order has a departure. It checks each shipment in order, and each window that contains the departure:
 
 1. It divides the warehouse's records into trips inside the window and trips outside it.
 2. Both groups need at least one trip. If the average inside is at least 1.25 × the average outside, it adds a warning.
@@ -392,7 +399,7 @@ flowchart TD
     R -- Yes --> Y["Warning with both averages"]
 ```
 
-Warning template, with averages in whole minutes: "W05 is often slow on Fri–Sun: 175 min on average (3 trips), against 128 min at other times (2 trips)."
+Warning template, with averages in whole minutes: "W05 (Malang) is often slow on Fri–Sun: 175 min on average (3 trips), against 128 min at other times (2 trips)."
 
 Averages per window in the sample records, in minutes. The number of trips is in brackets. A dash means no trips.
 
@@ -446,10 +453,10 @@ Response `200`:
   "metrics": { "shipmentCount": 2, "totalDistanceKm": 35 },
   "explanation": [
     "Split into 2 shipments, because no warehouse can deliver the whole order. Each product comes from the nearest warehouse that has it.",
-    "W02 (12 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
-    "W06 (95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
-    "Surgical Gloves (Box of 100): 100 from W01 (5 km).",
-    "Vaccine — Hepatitis B (10-dose vial): 10 from W04 (30 km)."
+    "W02 (Surabaya, 12 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
+    "W06 (Malang, 95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
+    "Surgical Gloves (Box of 100): 100 from W01 (Surabaya, 5 km).",
+    "Vaccine — Hepatitis B (10-dose vial): 10 from W04 (Gresik, 30 km)."
   ],
   "excluded": [
     { "warehouseId": "W04", "productId": "P001", "reason": "NO_STOCK" },
