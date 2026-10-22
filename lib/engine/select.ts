@@ -2,8 +2,14 @@ import { byDistance, canShip, stockOf } from "./eligibility";
 import type { OrderLine, Snapshot, Warehouse } from "./types";
 
 // `warehouse` holds the stock; `hub` delivers it to the customer. They differ when the
-// stock moves to another warehouse in the same city first.
-export type Allocation = { warehouse: Warehouse; hub: Warehouse; productId: string; quantity: number };
+// stock moves to another warehouse in the same city first. `van` is set on a van pickup.
+export type Allocation = {
+  warehouse: Warehouse;
+  hub: Warehouse;
+  van?: Warehouse;
+  productId: string;
+  quantity: number;
+};
 
 export type Selection = { mode: "SINGLE" | "SPLIT"; allocations: Allocation[] };
 
@@ -40,6 +46,27 @@ function sources(group: CityGroup, productId: string, eligible: Map<string, Ware
   return [group.hub, ...group.members.filter((w) => w !== group.hub)].filter((w) => list.includes(w));
 }
 
+// Fallback for a cold-chain product that is still short. A refrigerated van from the
+// nearest warehouse with a refrigerated fleet collects the product at warehouses that
+// have cold storage but no refrigerated fleet, nearest first.
+function pickups(productId: string, quantity: number, snapshot: Snapshot): Allocation[] {
+  if (!snapshot.products.get(productId)!.requiresColdChain) return [];
+  const warehouses = byDistance(snapshot.warehouses);
+  const van = warehouses.find((w) => w.hasRefrigeratedFleet);
+  if (!van) return [];
+
+  const allocations: Allocation[] = [];
+  for (const warehouse of warehouses) {
+    if (quantity === 0) break;
+    if (!warehouse.hasColdStorage || warehouse.hasRefrigeratedFleet) continue;
+    const taken = Math.min(quantity, stockOf(snapshot, warehouse.id, productId));
+    if (taken === 0) continue;
+    allocations.push({ warehouse, hub: warehouse, van, productId, quantity: taken });
+    quantity -= taken;
+  }
+  return allocations;
+}
+
 export function select(
   lines: OrderLine[],
   eligible: Map<string, Warehouse[]>,
@@ -74,7 +101,8 @@ export function select(
     };
   }
 
-  // Each product is taken from its nearest group first, then the next nearest.
+  // Each product is taken from its nearest group first, then the next nearest. A cold-chain
+  // product that is still short is then collected by van, if possible.
   const allocations: Allocation[] = [];
   for (const { productId, quantity } of lines) {
     let remaining = quantity;
@@ -84,6 +112,7 @@ export function select(
       allocations.push(...taken);
       remaining -= taken.reduce((sum, a) => sum + a.quantity, 0);
     }
+    if (remaining > 0) allocations.push(...pickups(productId, remaining, snapshot));
   }
   return { mode: "SPLIT", allocations };
 }

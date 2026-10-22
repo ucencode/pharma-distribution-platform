@@ -19,7 +19,10 @@ const json = (body: unknown) =>
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 
-type Body = { items: { productId: string; quantity: number }[] };
+type Body = {
+  items: { productId: string; quantity: number }[];
+  departure?: { day: string; time: string };
+};
 const evaluate = async (body: Body) => {
   const res = await POST(json(body));
   expect(res.status).toBe(200);
@@ -113,8 +116,8 @@ describe("POST /api/orders/evaluate", () => {
         });
       }
       expect(decision.explanation).toEqual([
-        "No eligible warehouse has stock of the ordered products, so nothing can be shipped.",
-        "Test No Stock: 0 of 5 can be shipped, 5 short.",
+        "Nothing can be shipped: no warehouse that can deliver these products has them in stock.",
+        "Test No Stock: 0 of 5 available, 5 missing.",
       ]);
     });
 
@@ -134,19 +137,23 @@ describe("POST /api/orders/evaluate", () => {
       ]);
     });
 
-    it("returns PARTIAL when the total stock is lower than the quantity", async () => {
+    it("fills Hepatitis B 120 with 12 vials collected at W02 by a van from W04", async () => {
       const decision = await evaluate({ items: [{ productId: "P002", quantity: 120 }] });
-      expect(decision.status).toBe("PARTIAL");
+      expect(decision.status).toBe("FULL");
       expect(decision.shipments).toEqual([
         { warehouseId: "W04", distanceKm: 30, items: [{ productId: "P002", quantity: 40 }] },
         { warehouseId: "W07", distanceKm: 45, items: [{ productId: "P002", quantity: 8 }] },
         { warehouseId: "W08", distanceKm: 150, items: [{ productId: "P002", quantity: 60 }] },
+        {
+          warehouseId: "W02",
+          distanceKm: 54,
+          approximate: true,
+          vanFromWarehouseId: "W04",
+          items: [{ productId: "P002", quantity: 12 }],
+        },
       ]);
-      expect(decision.unfulfilled).toEqual([{ productId: "P002", requested: 120, available: 108 }]);
-      expect(decision.metrics).toEqual({ shipmentCount: 3, totalDistanceKm: 225 });
-      expect(decision.explanation).toContain(
-        "Vaccine — Hepatitis B (10-dose vial): 108 of 120 can be shipped, 12 short. W02 and W06 hold 50 more but cannot deliver cold-chain products.",
-      );
+      expect(decision.unfulfilled).toEqual([]);
+      expect(decision.metrics).toEqual({ shipmentCount: 4, totalDistanceKm: 279, approximate: true });
     });
   });
 
@@ -162,6 +169,7 @@ describe("POST /api/orders/evaluate", () => {
       {
         warehouseId: "W01",
         distanceKm: 5,
+        approximate: true,
         items: [
           { productId: "P001", quantity: 220 },
           { productId: "P003", quantity: 100 },
@@ -203,6 +211,7 @@ describe("POST /api/orders/evaluate", () => {
         {
           warehouseId: hub.id,
           distanceKm: 15,
+          approximate: true,
           items: [
             { productId: "P001", quantity: 100 },
             { productId: vaccine.id, quantity: 10 },
@@ -219,7 +228,7 @@ describe("POST /api/orders/evaluate", () => {
     }
   });
 
-  it("moves a cold-chain product only between cold-chain warehouses of the same city", async () => {
+  it("moves a cold-chain product only between cold-chain warehouses and collects the rest by van", async () => {
     // One city with three warehouses: the nearest has no cold chain, the other two do.
     // They hold only a test product, so other orders are not affected.
     const created = await db
@@ -245,22 +254,35 @@ describe("POST /api/orders/evaluate", () => {
       const decision = await evaluate({ items: [{ productId: vaccine.id, quantity: 12 }] });
 
       // The hub is the nearest cold-chain warehouse, not the nearest warehouse. The stock
-      // of the warehouse without a refrigerated fleet is not moved.
-      expect(decision.status).toBe("PARTIAL");
+      // of the warehouse without a refrigerated fleet is not moved to the hub; the 2 vials
+      // still missing are collected there by a van from the hub (2 + 1 + 1 km).
+      expect(decision.status).toBe("FULL");
       expect(decision.shipments).toEqual([
-        { warehouseId: hub.id, distanceKm: 2, items: [{ productId: vaccine.id, quantity: 10 }] },
+        {
+          warehouseId: hub.id,
+          distanceKm: 2,
+          approximate: true,
+          items: [{ productId: vaccine.id, quantity: 10 }],
+        },
+        {
+          warehouseId: noFleet.id,
+          distanceKm: 4,
+          approximate: true,
+          vanFromWarehouseId: hub.id,
+          items: [{ productId: vaccine.id, quantity: 2 }],
+        },
       ]);
       expect(decision.transfers).toEqual([
         { fromWarehouseId: other.id, toWarehouseId: hub.id, productId: vaccine.id, quantity: 4 },
       ]);
-      expect(decision.unfulfilled).toEqual([{ productId: vaccine.id, requested: 12, available: 10 }]);
+      expect(decision.unfulfilled).toEqual([]);
       expect(decision.excluded).toContainEqual({
         warehouseId: noFleet.id,
         productId: vaccine.id,
         reason: "NO_COLD_CHAIN",
       });
       expect(decision.explanation).toContain(
-        `${other.id} sends 4 Test Transit Vaccine to ${hub.id} for transit. ${hub.id} delivers them to the customer.`,
+        `${other.id} sends 4 Test Transit Vaccine to ${hub.id}, which delivers them with the rest of its shipment. The distance between ${other.id} and ${hub.id} is not known and is not counted.`,
       );
     } finally {
       await db.delete(inventory).where(eq(inventory.productId, vaccine.id));
@@ -287,7 +309,7 @@ describe("POST /api/orders/evaluate", () => {
         reason: "NO_COLD_CHAIN",
       });
       expect(decision.explanation).toContain(
-        "W02 (12 km) holds Vaccine — Tetanus Toxoid (10-dose vial) but has no refrigerated fleet, so it cannot deliver cold-chain products.",
+        "W02 (12 km) has Vaccine — Tetanus Toxoid (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
       );
     });
 
@@ -298,12 +320,20 @@ describe("POST /api/orders/evaluate", () => {
       ]);
     });
 
-    it("returns UNFULFILLABLE when only warehouses without cold chain hold the product", async () => {
-      const decision = await evaluate({ items: [{ productId: ids.coldChain, quantity: 10 }] });
-      expect(decision.status).toBe("UNFULFILLABLE");
-      expect(decision.shipments).toEqual([]);
+    it("collects at W02 by van when only warehouses without a refrigerated fleet hold the product", async () => {
+      const decision = await evaluate({ items: [{ productId: ids.coldChain, quantity: 20 }] });
+      expect(decision.status).toBe("PARTIAL");
+      expect(decision.shipments).toEqual([
+        {
+          warehouseId: "W02",
+          distanceKm: 54,
+          approximate: true,
+          vanFromWarehouseId: "W04",
+          items: [{ productId: ids.coldChain, quantity: 15 }],
+        },
+      ]);
       expect(decision.unfulfilled).toEqual([
-        { productId: ids.coldChain, requested: 10, available: 0 },
+        { productId: ids.coldChain, requested: 20, available: 15 },
       ]);
       expect(decision.excluded).toContainEqual({
         warehouseId: "W01",
@@ -315,12 +345,49 @@ describe("POST /api/orders/evaluate", () => {
         productId: ids.coldChain,
         reason: "NO_COLD_CHAIN",
       });
+      // W01 has no cold storage, so its stock is never collected.
       expect(decision.explanation).toEqual([
-        "No eligible warehouse has stock of the ordered products, so nothing can be shipped.",
-        "W01 (5 km) holds Test Cold Chain but has no cold storage and no refrigerated fleet, so it cannot deliver cold-chain products.",
-        "W02 (12 km) holds Test Cold Chain but has no refrigerated fleet, so it cannot deliver cold-chain products.",
-        "Test Cold Chain: 0 of 10 can be shipped, 10 short. W01 and W02 hold 20 more but cannot deliver cold-chain products.",
+        "Shipped from W02 (about 54 km). No warehouse can deliver the whole order.",
+        "W01 (5 km) has Test Cold Chain in stock but no cold storage and no refrigerated fleet, so it cannot deliver cold-chain products.",
+        "W02 (12 km) has no refrigerated fleet, and the other warehouses do not have enough stock. A refrigerated van from W04 (30 km) collects 15 Test Cold Chain at W02 and delivers them. The trip is about 54 km: at most 30 + 12 km to reach W02, because the distance between W04 and W02 is not known, then 12 km to the customer.",
+        "Test Cold Chain: 15 from W02 by van from W04 (about 54 km).",
+        "Test Cold Chain: 15 of 20 available, 5 missing. W01 has 5 more in stock but cannot deliver cold-chain products.",
       ]);
+    });
+  });
+
+  describe("delivery time warnings", () => {
+    it("warns that W05 is slow on Fri–Sun", async () => {
+      const decision = await evaluate({
+        items: [{ productId: "P005", quantity: 400 }],
+        departure: { day: "Fri", time: "14:00" },
+      });
+      expect(decision.shipments.map((s: { warehouseId: string }) => s.warehouseId)).toEqual(["W05"]);
+      expect(decision.warnings).toEqual([
+        "W05 is often slow on Fri–Sun: 175 min on average (3 trips), against 128 min at other times (2 trips).",
+      ]);
+    });
+
+    it("warns that W01 is slow in weekday rush hour", async () => {
+      const decision = await evaluate({
+        items: [{ productId: "P001", quantity: 100 }],
+        departure: { day: "Mon", time: "08:00" },
+      });
+      expect(decision.warnings).toEqual([
+        "W01 is often slow in weekday rush hour (Mon–Fri, 07:00–09:00 and 16:00–19:00): 55 min on average (4 trips), against 14 min at other times (4 trips).",
+      ]);
+    });
+
+    it("gives no warnings without a departure", async () => {
+      const decision = await evaluate({ items: [{ productId: "P005", quantity: 400 }] });
+      expect(decision.warnings).toEqual([]);
+    });
+
+    it("returns 400 for an invalid departure", async () => {
+      const items = [{ productId: "P001", quantity: 1 }];
+      expect((await POST(json({ items, departure: { day: "Funday", time: "08:00" } }))).status).toBe(400);
+      expect((await POST(json({ items, departure: { day: "Mon", time: "25:00" } }))).status).toBe(400);
+      expect((await POST(json({ items, departure: { day: "Mon" } }))).status).toBe(400);
     });
   });
 });

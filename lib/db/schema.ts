@@ -8,6 +8,7 @@ import {
   pgTable,
   primaryKey,
   text,
+  time,
   timestamp,
 } from "drizzle-orm/pg-core";
 
@@ -67,5 +68,28 @@ export const inventory = pgTable(
   (t) => [
     primaryKey({ columns: [t.warehouseId, t.productId] }),
     check("quantity_non_negative", sql`${t.quantity} >= 0`),
+  ],
+);
+
+// Past deliveries from each warehouse to the customer. The departure has a day of the week
+// and a time, but no date.
+export const deliveries = pgTable(
+  "deliveries",
+  {
+    id: text("id").primaryKey(),
+    warehouseId: text("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id),
+    departureDay: text("departure_day").notNull(),
+    departureTime: time("departure_time").notNull(),
+    durationMinutes: integer("duration_minutes").notNull(),
+    notes: text("notes"),
+  },
+  (t) => [
+    check(
+      "departure_day_valid",
+      sql`${t.departureDay} IN ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun')`,
+    ),
+    check("duration_positive", sql`${t.durationMinutes} > 0`),
   ],
 );

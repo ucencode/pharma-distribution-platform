@@ -3,7 +3,7 @@
 import { Play, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { products, warehouses } from "@/lib/db/schema";
-import type { Decision } from "@/lib/engine";
+import { DAYS, type Day, type Decision, type Departure } from "@/lib/engine";
 import { api } from "./api";
 import Alert from "./Alert";
 import Field from "./Field";
@@ -17,10 +17,29 @@ type Line = { productId: string; quantity: string };
 
 const blankLine: Line = { productId: "", quantity: "" };
 
+const HOURS = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, "0")}:00`);
+
+// Current day and time in Jakarta (WIB), the time zone of the customer.
+function jakartaNow(): Departure {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Jakarta",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)!.value;
+  return { day: part("weekday") as Day, time: `${part("hour")}:${part("minute")}` };
+}
+
 export default function OrderForm() {
   const [productList, setProductList] = useState<Product[]>([]);
   const [warehouseList, setWarehouseList] = useState<Warehouse[]>([]);
   const [lines, setLines] = useState<Line[]>([blankLine]);
+  const [mode, setMode] = useState<"now" | "simulate">("now");
+  const [now, setNow] = useState<Departure | null>(null);
+  const [day, setDay] = useState<Day>("Mon");
+  const [hour, setHour] = useState("08:00");
   const [decision, setDecision] = useState<Decision | null>(null);
   const [error, setError] = useState("");
 
@@ -33,6 +52,17 @@ export default function OrderForm() {
       .catch((e: Error) => setError(e.message));
   }, []);
 
+  // The clock is read in the browser only, so the server-rendered HTML has no time in it.
+  useEffect(() => {
+    const tick = () => setNow(jakartaNow());
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 15_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, []);
+
   const update = (index: number, change: Partial<Line>) =>
     setLines(lines.map((line, i) => (i === index ? { ...line, ...change } : line)));
 
@@ -42,7 +72,8 @@ export default function OrderForm() {
     setDecision(null);
     try {
       const items = lines.map((l) => ({ productId: l.productId, quantity: Number(l.quantity) }));
-      setDecision(await api<Decision>("/api/orders/evaluate", "POST", { items }));
+      const departure = mode === "now" ? jakartaNow() : { day, time: hour };
+      setDecision(await api<Decision>("/api/orders/evaluate", "POST", { items, departure }));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -97,6 +128,45 @@ export default function OrderForm() {
             </button>
           </div>
         ))}
+
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-sm font-medium">Departure</legend>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="radio" name="mode" checked={mode === "now"} onChange={() => setMode("now")} />
+            Use current time{now && ` (${now.day} ${now.time.replace(/^0/, "")} WIB)`}
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="mode"
+              checked={mode === "simulate"}
+              onChange={() => setMode("simulate")}
+            />
+            Simulate time
+          </label>
+          {mode === "simulate" && (
+            <div className="flex flex-wrap items-end gap-3 pl-6">
+              <Field label="Day" className="w-32">
+                <select className={input} value={day} onChange={(e) => setDay(e.target.value as Day)}>
+                  {DAYS.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Time" className="w-32">
+                <select className={input} value={hour} onChange={(e) => setHour(e.target.value)}>
+                  {HOURS.map((h) => (
+                    <option key={h} value={h}>
+                      {h}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          )}
+        </fieldset>
 
         <div className="flex flex-wrap justify-between gap-2">
           <button type="button" className={button} onClick={() => setLines([...lines, blankLine])}>

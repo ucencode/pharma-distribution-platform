@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DAYS } from "@/lib/engine";
 
 const nonEmpty = (o: object) => Object.keys(o).length > 0;
 
@@ -49,4 +50,10 @@ export const orderSchema = z.object({
       }),
     )
     .min(1),
+  departure: z
+    .object({
+      day: z.enum(DAYS),
+      time: z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/, "Time must be HH:MM"),
+    })
+    .optional(),
 });

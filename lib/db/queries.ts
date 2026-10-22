@@ -1,10 +1,11 @@
-import type { Snapshot } from "@/lib/engine";
+import type { Day, Snapshot } from "@/lib/engine";
 import { db } from "./client";
-import { inventory, products, warehouses } from "./schema";
+import { deliveries, inventory, products, warehouses } from "./schema";
 
-// Loads the products, warehouses and stock the engine needs, with one query per table.
+// Loads the products, warehouses, stock and past deliveries the engine needs, with one
+// query per table.
 export async function loadSnapshot(): Promise<Snapshot> {
-  const [productRows, warehouseRows, stockRows] = await Promise.all([
+  const [productRows, warehouseRows, stockRows, deliveryRows] = await Promise.all([
     db
       .select({
         id: products.id,
@@ -20,6 +21,14 @@ export async function loadSnapshot(): Promise<Snapshot> {
         quantity: inventory.quantity,
       })
       .from(inventory),
+    db
+      .select({
+        warehouseId: deliveries.warehouseId,
+        day: deliveries.departureDay,
+        time: deliveries.departureTime,
+        durationMinutes: deliveries.durationMinutes,
+      })
+      .from(deliveries),
   ]);
 
   const stock: Snapshot["stock"] = new Map();
@@ -32,5 +41,7 @@ export async function loadSnapshot(): Promise<Snapshot> {
     products: new Map(productRows.map((p) => [p.id, p])),
     warehouses: warehouseRows,
     stock,
+    // The database returns times as "HH:MM:SS"; the engine compares "HH:MM".
+    deliveries: deliveryRows.map((d) => ({ ...d, day: d.day as Day, time: d.time.slice(0, 5) })),
   };
 }

@@ -46,7 +46,7 @@ describe("worked examples", () => {
     expect(decision.unfulfilled).toEqual([]);
     expect(decision.metrics).toEqual({ shipmentCount: 1, totalDistanceKm: 5 });
     expect(decision.explanation[0]).toBe(
-      "Fulfilled from 1 warehouse (W01, 5 km), the nearest warehouse that can supply the whole order.",
+      "Shipped in full from W01 (5 km), the nearest warehouse with the whole order in stock.",
     );
   });
 
@@ -65,9 +65,9 @@ describe("worked examples", () => {
     ]);
     expect(decision.excluded).toContainEqual({ warehouseId: "W01", productId: "P002", reason: "NO_STOCK" });
     expect(decision.explanation).toEqual([
-      "Split across 2 warehouses because no single warehouse can supply the whole order. Each product is taken from the nearest eligible warehouse first.",
-      "W02 (12 km) holds Vaccine — Hepatitis B (10-dose vial) but has no refrigerated fleet, so it cannot deliver cold-chain products.",
-      "W06 (95 km) holds Vaccine — Hepatitis B (10-dose vial) but has no refrigerated fleet, so it cannot deliver cold-chain products.",
+      "Split into 2 shipments, because no warehouse can deliver the whole order. Each product comes from the nearest warehouse that has it.",
+      "W02 (12 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
+      "W06 (95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
       "Surgical Gloves (Box of 100): 100 from W01 (5 km).",
       "Vaccine — Hepatitis B (10-dose vial): 10 from W04 (30 km).",
     ]);
@@ -89,20 +89,30 @@ describe("worked examples", () => {
     ]);
   });
 
-  it("D: Hepatitis B 120 is partial, short 12", () => {
+  it("D: Hepatitis B 120 is filled with 12 vials collected at W02 by a van from W04", () => {
     const decision = evaluate(order(["P002", 120]), sampleSnapshot());
 
-    expect(decision.status).toBe("PARTIAL");
+    expect(decision.status).toBe("FULL");
     expect(decision.shipments).toEqual([
       { warehouseId: "W04", distanceKm: 30, items: [{ productId: "P002", quantity: 40 }] },
       { warehouseId: "W07", distanceKm: 45, items: [{ productId: "P002", quantity: 8 }] },
       { warehouseId: "W08", distanceKm: 150, items: [{ productId: "P002", quantity: 60 }] },
+      {
+        warehouseId: "W02",
+        distanceKm: 54,
+        approximate: true,
+        vanFromWarehouseId: "W04",
+        items: [{ productId: "P002", quantity: 12 }],
+      },
     ]);
-    expect(decision.unfulfilled).toEqual([{ productId: "P002", requested: 120, available: 108 }]);
-    expect(decision.metrics).toEqual({ shipmentCount: 3, totalDistanceKm: 225 });
-    expect(decision.explanation.at(-1)).toBe(
-      "Vaccine — Hepatitis B (10-dose vial): 108 of 120 can be shipped, 12 short. W02 and W06 hold 50 more but cannot deliver cold-chain products.",
-    );
+    expect(decision.unfulfilled).toEqual([]);
+    expect(decision.metrics).toEqual({ shipmentCount: 4, totalDistanceKm: 279, approximate: true });
+    expect(decision.explanation).toEqual([
+      "Split into 4 shipments, because no warehouse can deliver the whole order. Each product comes from the nearest warehouse that has it.",
+      "W06 (95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
+      "W02 (12 km) has no refrigerated fleet, and the other warehouses do not have enough stock. A refrigerated van from W04 (30 km) collects 12 Vaccine — Hepatitis B (10-dose vial) at W02 and delivers them. The trip is about 54 km: at most 30 + 12 km to reach W02, because the distance between W04 and W02 is not known, then 12 km to the customer.",
+      "Vaccine — Hepatitis B (10-dose vial): 40 from W04 (30 km), 8 from W07 (45 km), 60 from W08 (150 km) and 12 from W02 by van from W04 (about 54 km).",
+    ]);
   });
 });
 
@@ -115,6 +125,7 @@ describe("same-city transit", () => {
       {
         warehouseId: "W01",
         distanceKm: 5,
+        approximate: true,
         items: [
           { productId: "P001", quantity: 220 },
           { productId: "P003", quantity: 100 },
@@ -124,10 +135,10 @@ describe("same-city transit", () => {
     expect(decision.transfers).toEqual([
       { fromWarehouseId: "W02", toWarehouseId: "W01", productId: "P001", quantity: 20 },
     ]);
-    expect(decision.metrics).toEqual({ shipmentCount: 1, totalDistanceKm: 5 });
+    expect(decision.metrics).toEqual({ shipmentCount: 1, totalDistanceKm: 5, approximate: true });
     expect(decision.explanation).toEqual([
-      "Fulfilled with 1 delivery from W01 (5 km). Warehouses in Surabaya together supply the whole order.",
-      "W02 sends 20 Surgical Gloves (Box of 100) to W01 for transit. W01 delivers them to the customer.",
+      "Shipped in one delivery from W01 (5 km). The Surabaya warehouses together have the whole order, so they combine their stock at W01.",
+      "W02 sends 20 Surgical Gloves (Box of 100) to W01, which delivers them with the rest of its shipment. The distance between W02 and W01 is not known and is not counted.",
       "Surgical Gloves (Box of 100): 200 from W01 (5 km) and 20 from W02 through W01 (5 km).",
       "Disposable Syringe (Box of 50): 100 from W01 (5 km).",
     ]);
@@ -137,14 +148,14 @@ describe("same-city transit", () => {
     const decision = evaluate(order(["P001", 600]), sampleSnapshot());
 
     expect(decision.shipments).toEqual([
-      { warehouseId: "W01", distanceKm: 5, items: [{ productId: "P001", quantity: 250 }] },
+      { warehouseId: "W01", distanceKm: 5, approximate: true, items: [{ productId: "P001", quantity: 250 }] },
       { warehouseId: "W03", distanceKm: 25, items: [{ productId: "P001", quantity: 300 }] },
       { warehouseId: "W07", distanceKm: 45, items: [{ productId: "P001", quantity: 50 }] },
     ]);
     expect(decision.transfers).toEqual([
       { fromWarehouseId: "W02", toWarehouseId: "W01", productId: "P001", quantity: 50 },
     ]);
-    expect(decision.metrics).toEqual({ shipmentCount: 3, totalDistanceKm: 75 });
+    expect(decision.metrics).toEqual({ shipmentCount: 3, totalDistanceKm: 75, approximate: true });
   });
 
   it("does not move cold-chain products to or from a warehouse without cold chain", () => {
@@ -171,6 +182,7 @@ describe("same-city transit", () => {
       {
         warehouseId: "W09",
         distanceKm: 15,
+        approximate: true,
         items: [
           { productId: "P001", quantity: 100 },
           { productId: "P002", quantity: 10 },
@@ -196,7 +208,7 @@ describe("same-city transit", () => {
     const decision = evaluate(order(["P001", 300]), snapshot);
 
     expect(decision.shipments).toEqual([
-      { warehouseId: "W01", distanceKm: 5, items: [{ productId: "P001", quantity: 300 }] },
+      { warehouseId: "W01", distanceKm: 5, approximate: true, items: [{ productId: "P001", quantity: 300 }] },
     ]);
     expect(decision.transfers).toEqual([
       { fromWarehouseId: "W02", toWarehouseId: "W01", productId: "P001", quantity: 50 },
@@ -206,9 +218,10 @@ describe("same-city transit", () => {
 });
 
 describe("unfulfillable order", () => {
-  it("allocates nothing when no eligible warehouse has stock", () => {
+  it("allocates nothing when no eligible warehouse has stock and no refrigerated van exists", () => {
     const snapshot = sampleSnapshot();
     for (const id of ["W04", "W07", "W08"]) snapshot.stock.get(id)!.delete("P002");
+    snapshot.warehouses = snapshot.warehouses.map((w) => ({ ...w, hasRefrigeratedFleet: false }));
 
     const decision = evaluate(order(["P002", 10]), snapshot);
 
@@ -216,6 +229,82 @@ describe("unfulfillable order", () => {
     expect(decision.shipments).toEqual([]);
     expect(decision.unfulfilled).toEqual([{ productId: "P002", requested: 10, available: 0 }]);
     expect(decision.metrics).toEqual({ shipmentCount: 0, totalDistanceKm: 0 });
+    expect(decision.explanation.at(-1)).toBe(
+      "Vaccine — Hepatitis B (10-dose vial): 0 of 10 available, 10 missing. W02 and W06 have 50 more in stock but cannot deliver cold-chain products.",
+    );
+  });
+});
+
+describe("van pickup", () => {
+  it("collects at W02 and then W06 when the order is still short, nearest first", () => {
+    const decision = evaluate(order(["P002", 200]), sampleSnapshot());
+
+    expect(decision.status).toBe("PARTIAL");
+    expect(decision.shipments.slice(3)).toEqual([
+      {
+        warehouseId: "W02",
+        distanceKm: 54,
+        approximate: true,
+        vanFromWarehouseId: "W04",
+        items: [{ productId: "P002", quantity: 30 }],
+      },
+      {
+        warehouseId: "W06",
+        distanceKm: 220,
+        approximate: true,
+        vanFromWarehouseId: "W04",
+        items: [{ productId: "P002", quantity: 20 }],
+      },
+    ]);
+    expect(decision.unfulfilled).toEqual([{ productId: "P002", requested: 200, available: 158 }]);
+    // All stock at W02 and W06 is used, so the shortfall line has no "more in stock" note.
+    expect(decision.explanation.at(-1)).toBe("Vaccine — Hepatitis B (10-dose vial): 158 of 200 available, 42 missing.");
+  });
+
+  it("is not used when the normal rule covers the order", () => {
+    const decision = evaluate(order(["P002", 10]), sampleSnapshot());
+
+    expect(decision.shipments).toEqual([
+      { warehouseId: "W04", distanceKm: 30, items: [{ productId: "P002", quantity: 10 }] },
+    ]);
+    expect(decision.metrics).toEqual({ shipmentCount: 1, totalDistanceKm: 30 });
+  });
+
+  it("never collects at a warehouse without cold storage", () => {
+    const snapshot = sampleSnapshot();
+    snapshot.stock.get("W01")!.set("P002", 100);
+
+    const decision = evaluate(order(["P002", 200]), snapshot);
+
+    expect(decision.shipments.map((s) => s.warehouseId)).not.toContain("W01");
+    expect(decision.explanation.at(-1)).toBe(
+      "Vaccine — Hepatitis B (10-dose vial): 158 of 200 available, 42 missing. W01 has 100 more in stock but cannot deliver cold-chain products.",
+    );
+  });
+
+  it("is not used for products without cold chain", () => {
+    const decision = evaluate(order(["P001", 2000]), sampleSnapshot());
+
+    expect(decision.status).toBe("PARTIAL");
+    expect(decision.shipments.some((s) => s.vanFromWarehouseId)).toBe(false);
+  });
+
+  it("uses the nearest warehouse with a refrigerated fleet as the van", () => {
+    const snapshot = sampleSnapshot();
+    snapshot.warehouses = snapshot.warehouses.map((w) =>
+      ["W04", "W07"].includes(w.id) ? { ...w, hasRefrigeratedFleet: false } : w,
+    );
+
+    const decision = evaluate(order(["P002", 100]), snapshot);
+
+    // W08 (150 km) is the only warehouse left with a refrigerated fleet.
+    expect(decision.shipments.find((s) => s.warehouseId === "W02")).toEqual({
+      warehouseId: "W02",
+      distanceKm: 174,
+      approximate: true,
+      vanFromWarehouseId: "W08",
+      items: [{ productId: "P002", quantity: 30 }],
+    });
   });
 });
 

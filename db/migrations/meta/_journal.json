@@ -15,6 +15,13 @@
       "when": 1792554815288,
       "tag": "0001_abnormal_annihilus",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792591735603,
+      "tag": "0002_lethal_whistler",
+      "breakpoints": true
     }
   ]
 }

@@ -15,7 +15,7 @@ const statusBadge: Record<Status, { variant: "green" | "amber" | "red"; label: s
 const card = "rounded border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900";
 const heading = "text-sm font-semibold text-zinc-900 dark:text-zinc-100";
 
-// Status, shipments, shortfall and explanation of one evaluated order.
+// Status, shipments, delivery time warnings, shortfall and explanation of one evaluated order.
 export default function ResultCard({
   decision,
   productList,
@@ -28,7 +28,7 @@ export default function ResultCard({
   const product = (id: string) => productList.find((p) => p.id === id);
   const city = (id: string) => warehouseList.find((w) => w.id === id)?.city;
   const { variant, label } = statusBadge[decision.status];
-  const { shipmentCount, totalDistanceKm } = decision.metrics;
+  const { shipmentCount, totalDistanceKm, approximate } = decision.metrics;
 
   return (
     <section aria-label="Result" className={`${card} flex flex-col gap-4`}>
@@ -36,18 +36,26 @@ export default function ResultCard({
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Result</h2>
         <Badge variant={variant}>{label}</Badge>
         <span className={muted}>
-          {shipmentCount} {shipmentCount === 1 ? "shipment" : "shipments"}, {totalDistanceKm} km in total
+          {shipmentCount} {shipmentCount === 1 ? "shipment" : "shipments"}, {approximate && "about "}
+          {totalDistanceKm} km in total
         </span>
       </div>
 
       {decision.shipments.length > 0 && (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {decision.shipments.map((s) => (
-            <div key={s.warehouseId} className="rounded border border-zinc-200 p-3 dark:border-zinc-800">
+            <div
+              key={`${s.warehouseId}-${s.vanFromWarehouseId ?? ""}`}
+              className="rounded border border-zinc-200 p-3 dark:border-zinc-800"
+            >
               <h3 className={heading}>
                 {s.warehouseId} · {city(s.warehouseId)}
               </h3>
-              <p className={muted}>{s.distanceKm} km from customer</p>
+              <p className={muted}>
+                {s.approximate && "about "}
+                {s.distanceKm} km {s.vanFromWarehouseId ? "trip" : "from customer"}
+              </p>
+              {s.vanFromWarehouseId && <p className={muted}>Refrigerated van from {s.vanFromWarehouseId}</p>}
               <ul className="mt-2 flex flex-col gap-1 text-sm text-zinc-900 dark:text-zinc-100">
                 {s.items.map((item) => (
                   <li key={item.productId} className="flex justify-between gap-3">
@@ -72,6 +80,17 @@ export default function ResultCard({
                 ))}
             </div>
           ))}
+        </div>
+      )}
+
+      {decision.warnings.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h3 className={heading}>Delivery time</h3>
+          <ul className="list-disc space-y-1 rounded bg-amber-100 py-2 pr-3 pl-8 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+            {decision.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
         </div>
       )}
 
