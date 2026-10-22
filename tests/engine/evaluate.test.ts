@@ -46,7 +46,7 @@ describe("worked examples", () => {
     expect(decision.unfulfilled).toEqual([]);
     expect(decision.metrics).toEqual({ shipmentCount: 1, totalDistanceKm: 5 });
     expect(decision.explanation[0]).toBe(
-      "Shipped in full from W01 (5 km), the nearest warehouse with the whole order in stock.",
+      "Shipped in full from W01 (Surabaya, 5 km), the nearest warehouse with the whole order in stock.",
     );
   });
 
@@ -66,10 +66,10 @@ describe("worked examples", () => {
     expect(decision.excluded).toContainEqual({ warehouseId: "W01", productId: "P002", reason: "NO_STOCK" });
     expect(decision.explanation).toEqual([
       "Split into 2 shipments, because no warehouse can deliver the whole order. Each product comes from the nearest warehouse that has it.",
-      "W02 (12 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
-      "W06 (95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
-      "Surgical Gloves (Box of 100): 100 from W01 (5 km).",
-      "Vaccine — Hepatitis B (10-dose vial): 10 from W04 (30 km).",
+      "W02 (Surabaya, 12 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
+      "W06 (Malang, 95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
+      "Surgical Gloves (Box of 100): 100 from W01 (Surabaya, 5 km).",
+      "Vaccine — Hepatitis B (10-dose vial): 10 from W04 (Gresik, 30 km).",
     ]);
   });
 
@@ -109,9 +109,9 @@ describe("worked examples", () => {
     expect(decision.metrics).toEqual({ shipmentCount: 4, totalDistanceKm: 279, approximate: true });
     expect(decision.explanation).toEqual([
       "Split into 4 shipments, because no warehouse can deliver the whole order. Each product comes from the nearest warehouse that has it.",
-      "W06 (95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
-      "W02 (12 km) has no refrigerated fleet, and the other warehouses do not have enough stock. A refrigerated van from W04 (30 km) collects 12 Vaccine — Hepatitis B (10-dose vial) at W02 and delivers them. The trip is about 54 km: at most 30 + 12 km to reach W02, because the distance between W04 and W02 is not known, then 12 km to the customer.",
-      "Vaccine — Hepatitis B (10-dose vial): 40 from W04 (30 km), 8 from W07 (45 km), 60 from W08 (150 km) and 12 from W02 by van from W04 (about 54 km).",
+      "W06 (Malang, 95 km) has Vaccine — Hepatitis B (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
+      "W02 (Surabaya, 12 km) has no refrigerated fleet, and the other warehouses do not have enough stock. A refrigerated van from W04 (Gresik, 30 km) collects 12 Vaccine — Hepatitis B (10-dose vial) at W02 and delivers them. The trip is about 54 km: at most 30 + 12 km to reach W02, because the distance between W04 and W02 is not known, then 12 km to the customer.",
+      "Vaccine — Hepatitis B (10-dose vial): 40 from W04 (Gresik, 30 km), 8 from W07 (Pasuruan, 45 km), 60 from W08 (Jember, 150 km) and 12 from W02 (Surabaya, about 54 km) by van from W04 (Gresik).",
     ]);
   });
 });
@@ -137,10 +137,10 @@ describe("same-city transit", () => {
     ]);
     expect(decision.metrics).toEqual({ shipmentCount: 1, totalDistanceKm: 5, approximate: true });
     expect(decision.explanation).toEqual([
-      "Shipped in one delivery from W01 (5 km). The Surabaya warehouses together have the whole order, so they combine their stock at W01.",
-      "W02 sends 20 Surgical Gloves (Box of 100) to W01, which delivers them with the rest of its shipment. The distance between W02 and W01 is not known and is not counted.",
-      "Surgical Gloves (Box of 100): 200 from W01 (5 km) and 20 from W02 through W01 (5 km).",
-      "Disposable Syringe (Box of 50): 100 from W01 (5 km).",
+      "Shipped in one delivery from W01 (Surabaya, 5 km). The Surabaya warehouses together have the whole order, so they combine their stock at W01.",
+      "W02 (Surabaya) sends 20 Surgical Gloves (Box of 100) to W01 (Surabaya), which delivers them with the rest of its shipment. The distance between W02 and W01 is not known and is not counted.",
+      "Surgical Gloves (Box of 100): 200 from W01 (Surabaya, 5 km) and 20 from W02 (Surabaya) through W01 (Surabaya, 5 km).",
+      "Disposable Syringe (Box of 50): 100 from W01 (Surabaya, 5 km).",
     ]);
   });
 
@@ -230,7 +230,7 @@ describe("unfulfillable order", () => {
     expect(decision.unfulfilled).toEqual([{ productId: "P002", requested: 10, available: 0 }]);
     expect(decision.metrics).toEqual({ shipmentCount: 0, totalDistanceKm: 0 });
     expect(decision.explanation.at(-1)).toBe(
-      "Vaccine — Hepatitis B (10-dose vial): 0 of 10 available, 10 missing. W02 and W06 have 50 more in stock but cannot deliver cold-chain products.",
+      "Vaccine — Hepatitis B (10-dose vial): 0 of 10 available, 10 missing. W02 (Surabaya) and W06 (Malang) have 50 more in stock but cannot deliver cold-chain products.",
     );
   });
 });
@@ -278,7 +278,7 @@ describe("van pickup", () => {
 
     expect(decision.shipments.map((s) => s.warehouseId)).not.toContain("W01");
     expect(decision.explanation.at(-1)).toBe(
-      "Vaccine — Hepatitis B (10-dose vial): 158 of 200 available, 42 missing. W01 has 100 more in stock but cannot deliver cold-chain products.",
+      "Vaccine — Hepatitis B (10-dose vial): 158 of 200 available, 42 missing. W01 (Surabaya) has 100 more in stock but cannot deliver cold-chain products.",
     );
   });
 
@@ -297,7 +297,7 @@ describe("van pickup", () => {
 
     const decision = evaluate(order(["P002", 100]), snapshot);
 
-    // W08 (150 km) is the only warehouse left with a refrigerated fleet.
+    // W08 (Jember, 150 km) is the only warehouse left with a refrigerated fleet.
     expect(decision.shipments.find((s) => s.warehouseId === "W02")).toEqual({
       warehouseId: "W02",
       distanceKm: 174,

@@ -282,7 +282,7 @@ describe("POST /api/orders/evaluate", () => {
         reason: "NO_COLD_CHAIN",
       });
       expect(decision.explanation).toContain(
-        `${other.id} sends 4 Test Transit Vaccine to ${hub.id}, which delivers them with the rest of its shipment. The distance between ${other.id} and ${hub.id} is not known and is not counted.`,
+        `${other.id} (Test Transit City) sends 4 Test Transit Vaccine to ${hub.id} (Test Transit City), which delivers them with the rest of its shipment. The distance between ${other.id} and ${hub.id} is not known and is not counted.`,
       );
     } finally {
       await db.delete(inventory).where(eq(inventory.productId, vaccine.id));
@@ -309,7 +309,7 @@ describe("POST /api/orders/evaluate", () => {
         reason: "NO_COLD_CHAIN",
       });
       expect(decision.explanation).toContain(
-        "W02 (12 km) has Vaccine — Tetanus Toxoid (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
+        "W02 (Surabaya, 12 km) has Vaccine — Tetanus Toxoid (10-dose vial) in stock but no refrigerated fleet, so it cannot deliver cold-chain products.",
       );
     });
 
@@ -347,11 +347,11 @@ describe("POST /api/orders/evaluate", () => {
       });
       // W01 has no cold storage, so its stock is never collected.
       expect(decision.explanation).toEqual([
-        "Shipped from W02 (about 54 km). No warehouse can deliver the whole order.",
-        "W01 (5 km) has Test Cold Chain in stock but no cold storage and no refrigerated fleet, so it cannot deliver cold-chain products.",
-        "W02 (12 km) has no refrigerated fleet, and the other warehouses do not have enough stock. A refrigerated van from W04 (30 km) collects 15 Test Cold Chain at W02 and delivers them. The trip is about 54 km: at most 30 + 12 km to reach W02, because the distance between W04 and W02 is not known, then 12 km to the customer.",
-        "Test Cold Chain: 15 from W02 by van from W04 (about 54 km).",
-        "Test Cold Chain: 15 of 20 available, 5 missing. W01 has 5 more in stock but cannot deliver cold-chain products.",
+        "Shipped from W02 (Surabaya, about 54 km). No warehouse can deliver the whole order.",
+        "W01 (Surabaya, 5 km) has Test Cold Chain in stock but no cold storage and no refrigerated fleet, so it cannot deliver cold-chain products.",
+        "W02 (Surabaya, 12 km) has no refrigerated fleet, and the other warehouses do not have enough stock. A refrigerated van from W04 (Gresik, 30 km) collects 15 Test Cold Chain at W02 and delivers them. The trip is about 54 km: at most 30 + 12 km to reach W02, because the distance between W04 and W02 is not known, then 12 km to the customer.",
+        "Test Cold Chain: 15 from W02 (Surabaya, about 54 km) by van from W04 (Gresik).",
+        "Test Cold Chain: 15 of 20 available, 5 missing. W01 (Surabaya) has 5 more in stock but cannot deliver cold-chain products.",
       ]);
     });
   });
@@ -364,7 +364,7 @@ describe("POST /api/orders/evaluate", () => {
       });
       expect(decision.shipments.map((s: { warehouseId: string }) => s.warehouseId)).toEqual(["W05"]);
       expect(decision.warnings).toEqual([
-        "W05 is often slow on Fri–Sun: 175 min on average (3 trips), against 128 min at other times (2 trips).",
+        "W05 (Malang) is often slow on Fri–Sun: 175 min on average (3 trips), against 128 min at other times (2 trips).",
       ]);
     });
 
@@ -374,7 +374,7 @@ describe("POST /api/orders/evaluate", () => {
         departure: { day: "Mon", time: "08:00" },
       });
       expect(decision.warnings).toEqual([
-        "W01 is often slow in weekday rush hour (Mon–Fri, 07:00–09:00 and 16:00–19:00): 55 min on average (4 trips), against 14 min at other times (4 trips).",
+        "W01 (Surabaya) is often slow in weekday rush hour (Mon–Fri, 07:00–09:00 and 16:00–19:00): 55 min on average (4 trips), against 14 min at other times (4 trips).",
       ]);
     });
 

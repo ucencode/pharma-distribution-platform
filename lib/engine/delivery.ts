@@ -1,4 +1,4 @@
-import type { Day, Delivery, Departure, Shipment } from "./types";
+import type { Day, Delivery, Departure, Shipment, Warehouse } from "./types";
 
 export const DAYS: Day[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -36,9 +36,15 @@ const trips = (n: number) => `${n} ${n === 1 ? "trip" : "trips"}`;
 
 // Warns when a shipment leaves in a window in which its warehouse's past trips were slow.
 // The warnings do not change the decision. Shipments are checked in their order.
-export function slowWarnings(shipments: Shipment[], deliveries: Delivery[], departure: Departure): string[] {
+export function slowWarnings(
+  shipments: Shipment[],
+  warehouses: Warehouse[],
+  deliveries: Delivery[],
+  departure: Departure,
+): string[] {
   const warnings: string[] = [];
   for (const { warehouseId } of shipments) {
+    const { city } = warehouses.find((w) => w.id === warehouseId)!;
     const history = deliveries.filter((d) => d.warehouseId === warehouseId);
     for (const window of WINDOWS) {
       if (!inWindow(window, departure.day, departure.time)) continue;
@@ -47,7 +53,7 @@ export function slowWarnings(shipments: Shipment[], deliveries: Delivery[], depa
       if (inside.length === 0 || outside.length === 0) continue;
       if (average(inside) < SLOW_RATIO * average(outside)) continue;
       warnings.push(
-        `${warehouseId} is often slow ${window.label}: ${Math.round(average(inside))} min on average (${trips(inside.length)}), against ${Math.round(average(outside))} min at other times (${trips(outside.length)}).`,
+        `${warehouseId} (${city}) is often slow ${window.label}: ${Math.round(average(inside))} min on average (${trips(inside.length)}), against ${Math.round(average(outside))} min at other times (${trips(outside.length)}).`,
       );
     }
   }

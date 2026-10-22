@@ -11,9 +11,9 @@ const gloves: [string, number][] = [["P001", 100]];
 const paracetamol: [string, number][] = [["P005", 400]];
 
 const w01RushHour =
-  "W01 is often slow in weekday rush hour (Mon–Fri, 07:00–09:00 and 16:00–19:00): 55 min on average (4 trips), against 14 min at other times (4 trips).";
+  "W01 (Surabaya) is often slow in weekday rush hour (Mon–Fri, 07:00–09:00 and 16:00–19:00): 55 min on average (4 trips), against 14 min at other times (4 trips).";
 const w05Weekend =
-  "W05 is often slow on Fri–Sun: 175 min on average (3 trips), against 128 min at other times (2 trips).";
+  "W05 (Malang) is often slow on Fri–Sun: 175 min on average (3 trips), against 128 min at other times (2 trips).";
 
 describe("delivery time warnings", () => {
   it("gives no warnings without a departure", () => {
@@ -59,7 +59,7 @@ describe("delivery time warnings", () => {
     expect(decision.shipments.map((s) => s.warehouseId)).toEqual(["W01", "W04"]);
     expect(decision.warnings).toEqual([
       w01RushHour,
-      "W04 is often slow in weekday rush hour (Mon–Fri, 07:00–09:00 and 16:00–19:00): 78 min on average (2 trips), against 44 min at other times (3 trips).",
+      "W04 (Gresik) is often slow in weekday rush hour (Mon–Fri, 07:00–09:00 and 16:00–19:00): 78 min on average (2 trips), against 44 min at other times (3 trips).",
     ]);
   });
 

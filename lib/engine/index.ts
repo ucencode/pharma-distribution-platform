@@ -138,6 +138,6 @@ export function evaluate(order: Order, snapshot: Snapshot): Decision {
     },
     explanation,
     excluded,
-    warnings: order.departure ? slowWarnings(shipments, snapshot.deliveries, order.departure) : [],
+    warnings: order.departure ? slowWarnings(shipments, warehouses, snapshot.deliveries, order.departure) : [],
   };
 }

@@ -16,7 +16,11 @@ type ExplainInput = {
 const joinList = (items: string[]) =>
   items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
 
-const place = (warehouse: Warehouse) => `${warehouse.id} (${warehouse.distanceToCustomerKm} km)`;
+// A line names the city at the first mention of each warehouse, for example "W01 (Surabaya)".
+const label = (warehouse: Warehouse) => `${warehouse.id} (${warehouse.city})`;
+
+const place = (warehouse: Warehouse) =>
+  `${warehouse.id} (${warehouse.city}, ${warehouse.distanceToCustomerKm} km)`;
 
 const km = (shipment: Shipment) => `${shipment.approximate ? "about " : ""}${shipment.distanceKm} km`;
 
@@ -33,6 +37,10 @@ export function explain(input: ExplainInput, snapshot: Snapshot): string[] {
   const { lines, warehouses, selection, shipments, transfers, unfulfilled, excluded, status } = input;
   const name = (productId: string) => snapshot.products.get(productId)!.name;
   const warehouse = (id: string) => warehouses.find((w) => w.id === id)!;
+  const shippedFrom = (shipment: Shipment) => {
+    const { id, city } = warehouse(shipment.warehouseId);
+    return `${id} (${city}, ${km(shipment)})`;
+  };
   const pickedUp = (warehouseId: string, productId: string) =>
     selection.allocations
       .filter((a) => a.van && a.warehouse.id === warehouseId && a.productId === productId)
@@ -50,15 +58,11 @@ export function explain(input: ExplainInput, snapshot: Snapshot): string[] {
       `Shipped in one delivery from ${place(hub)}. The ${hub.city} warehouses together have the whole order, so they combine their stock at ${hub.id}.`,
     );
   } else if (selection.mode === "SINGLE") {
-    const warehouse = shipments[0];
     explanation.push(
-      `Shipped in full from ${warehouse.warehouseId} (${warehouse.distanceKm} km), the nearest warehouse with the whole order in stock.`,
+      `Shipped in full from ${shippedFrom(shipments[0])}, the nearest warehouse with the whole order in stock.`,
     );
   } else if (shipments.length === 1) {
-    const warehouse = shipments[0];
-    explanation.push(
-      `Shipped from ${warehouse.warehouseId} (${km(warehouse)}). No warehouse can deliver the whole order.`,
-    );
+    explanation.push(`Shipped from ${shippedFrom(shipments[0])}. No warehouse can deliver the whole order.`);
   } else {
     explanation.push(
       `Split into ${shipments.length} shipments, because no warehouse can deliver the whole order. Each product comes from the nearest warehouse that has it.`,
@@ -90,7 +94,7 @@ export function explain(input: ExplainInput, snapshot: Snapshot): string[] {
   // Transit, one line per transfer
   for (const { fromWarehouseId, toWarehouseId, productId, quantity } of transfers) {
     explanation.push(
-      `${fromWarehouseId} sends ${quantity} ${name(productId)} to ${toWarehouseId}, which delivers them with the rest of its shipment. The distance between ${fromWarehouseId} and ${toWarehouseId} is not known and is not counted.`,
+      `${label(warehouse(fromWarehouseId))} sends ${quantity} ${name(productId)} to ${label(warehouse(toWarehouseId))}, which delivers them with the rest of its shipment. The distance between ${fromWarehouseId} and ${toWarehouseId} is not known and is not counted.`,
     );
   }
 
@@ -101,11 +105,11 @@ export function explain(input: ExplainInput, snapshot: Snapshot): string[] {
       .map((a) => {
         if (a.van) {
           const pickup = pickups.find((s) => s.warehouseId === a.warehouse.id)!;
-          return `${a.quantity} from ${a.warehouse.id} by van from ${a.van.id} (${km(pickup)})`;
+          return `${a.quantity} from ${shippedFrom(pickup)} by van from ${label(a.van)}`;
         }
         return a.warehouse === a.hub
           ? `${a.quantity} from ${place(a.warehouse)}`
-          : `${a.quantity} from ${a.warehouse.id} through ${place(a.hub)}`;
+          : `${a.quantity} from ${label(a.warehouse)} through ${place(a.hub)}`;
       });
     if (parts.length === 0) continue;
     explanation.push(`${name(productId)}: ${joinList(parts)}.`);
@@ -121,7 +125,7 @@ export function explain(input: ExplainInput, snapshot: Snapshot): string[] {
     if (blocked.length > 0) {
       const held = blocked.reduce((sum, e) => sum + left(e.warehouseId), 0);
       const verb = blocked.length === 1 ? "has" : "have";
-      line += ` ${joinList(blocked.map((e) => e.warehouseId))} ${verb} ${held} more in stock but cannot deliver cold-chain products.`;
+      line += ` ${joinList(blocked.map((e) => label(warehouse(e.warehouseId))))} ${verb} ${held} more in stock but cannot deliver cold-chain products.`;
     }
     explanation.push(line);
   }
